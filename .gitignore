@@ -1,0 +1,136 @@
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# API Keys and Secrets
+*.key
+*.pem
+secrets.json
+
+# Database files (allowing main DB files, but excluding temp files)
+*.db-shm
+*.db-wal
+
+# Log files
+*.log
+logs/
+fastapi-server.log
+huey-worker.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Next.js (frontend)
+.next/
+out/
+build
+
+# Misc
+.nyc_output
+.sass-cache/
+connect.lock
+coverage
+libpeerconnection.log
+testem.log
+typings/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Data files (optional - uncomment if you don't want to track data)
+# data/
+# *.csv
+# *.json
+
+# Test files
+test_*.py
+*_test.py
+tests/__pycache__/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local configuration
+config.local.json
+settings.local.json

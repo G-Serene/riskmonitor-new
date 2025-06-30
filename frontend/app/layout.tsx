@@ -1,12 +1,9 @@
 import type React from "react"
-import { Inter } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { SidebarProvider } from "@/components/ui/sidebar" // Assuming sidebar.tsx is in components/ui
 import { Toaster } from "@/components/ui/toaster"
 import { cookies } from "next/headers"
-
-const inter = Inter({ subsets: ["latin"] })
 
 export const metadata = {
   title: "Risk Monitoring Dashboard",
@@ -24,7 +21,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className="font-system">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <SidebarProvider defaultOpen={defaultOpen}>{children}</SidebarProvider>
           <Toaster />

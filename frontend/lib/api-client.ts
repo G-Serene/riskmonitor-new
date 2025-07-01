@@ -27,6 +27,11 @@ export interface NewsArticle {
   keywords: string[]
   entities: string[]
   minutes_ago?: number  // For recent news feed with relative time
+  // Theme-related fields
+  primary_theme?: string
+  theme_display_name?: string
+  theme_confidence?: number
+  theme_keywords?: string[]
 }
 
 export interface DashboardSummary {
@@ -92,6 +97,107 @@ export interface NewsResponse {
   }
 }
 
+export interface ThemeStatistics {
+  theme_id: string
+  theme_name: string
+  article_count: number
+  avg_risk_score: number
+  avg_confidence: number
+  critical_count: number
+  market_moving_count: number
+}
+
+export interface ThemeStatisticsResponse {
+  themes: ThemeStatistics[]
+  total_themes: number
+  total_articles: number
+  generated_at: string
+}
+
+export interface ThemeArticlesResponse {
+  theme_id: string
+  theme_name: string
+  articles: NewsArticle[]
+  total_count: number
+}
+
+export interface StorylineResponse {
+  theme_id: string
+  theme_name: string
+  storyline: string
+  context: {
+    theme_name: string
+    article_count: number
+    total_exposure: number
+    date_range: {
+      start: string
+      end: string
+    }
+    geographic_scope: {
+      countries: string[]
+      country_count: number
+      cross_country_events: Record<string, string[]>
+    }
+    market_scope: {
+      markets: string[]
+      market_count: number
+      cross_market_events: Record<string, string[]>
+    }
+    severity_distribution: {
+      Critical: number
+      High: number
+      Medium: number
+      Low: number
+    }
+    avg_risk_score: number
+    max_risk_score: number
+  }
+  report_data: {
+    report_metadata: {
+      title: string
+      generated_at: string
+      report_id: string
+      analyst: string
+      classification: string
+    }
+    executive_summary: any
+    storyline_content: string
+    supporting_data: any
+    article_references: Array<{
+      id: number
+      headline: string
+      source: string
+      date: string
+      severity: string
+      risk_score: number
+      countries: string[]
+      financial_exposure: number
+    }>
+    risk_metrics: any
+  }
+  metadata: {
+    articles_analyzed: number
+    articles_selected: number
+    total_exposure: number
+    affected_countries: string[]
+    affected_markets: string[]
+    severity_distribution: Record<string, number>
+    avg_risk_score: number
+    generation_date: string
+  }
+}
+
+export interface RecentStorylinesResponse {
+  storylines: Array<{
+    theme_id: string
+    theme_name: string
+    storyline: string
+    generated_at: string
+    article_count: number
+  }>
+  total_count: number
+}
+
 class ApiClient {
   private baseUrl: string
 
@@ -115,6 +221,22 @@ class ApiClient {
       headers: {
         "Content-Type": "application/json",
       },
+    })
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status} ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+
+  async post<T>(endpoint: string, data?: any): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: data ? JSON.stringify(data) : undefined,
     })
 
     if (!response.ok) {
@@ -163,6 +285,72 @@ class ApiClient {
   // Health check
   async healthCheck() {
     return this.get("/api/health")
+  }
+
+  // Theme-based endpoints
+  async getThemeStatistics(): Promise<ThemeStatisticsResponse> {
+    return this.get<ThemeStatisticsResponse>("/api/themes/statistics")
+  }
+
+  async getThemeArticles(themeId: string): Promise<ThemeArticlesResponse> {
+    return this.get<ThemeArticlesResponse>(`/api/themes/${themeId}/articles`)
+  }
+
+  async generateThemeStoryline(
+    themeId: string, 
+    maxArticles: number = 50, 
+    daysBack: number = 30
+  ): Promise<StorylineResponse> {
+    return this.post<StorylineResponse>(`/api/themes/${themeId}/storyline?max_articles=${maxArticles}&days_back=${daysBack}`, {})
+  }
+
+  async downloadStorylineReport(themeId: string) {
+    const url = `${this.baseUrl}/api/themes/${themeId}/storyline/download?format=pdf`
+    
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status} ${response.statusText}`)
+      }
+
+      // Create download
+      const blob = await response.blob()
+      const downloadUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      
+      // Extract filename from Content-Disposition header or create default
+      const contentDisposition = response.headers.get('Content-Disposition')
+      let filename = `risk_impact_assessment_${themeId}_${new Date().toISOString().split('T')[0]}.html`
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=(.+)/)
+        if (filenameMatch) {
+          filename = filenameMatch[1].replace(/"/g, '')
+        }
+      }
+      
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(downloadUrl)
+      
+      return { success: true, filename }
+    } catch (error) {
+      console.error('Download error:', error)
+      throw error
+    }
+  }
+
+  async getRecentStorylines(): Promise<RecentStorylinesResponse> {
+    return this.get<RecentStorylinesResponse>("/api/storylines")
   }
 }
 

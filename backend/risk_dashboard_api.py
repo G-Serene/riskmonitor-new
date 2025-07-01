@@ -84,6 +84,16 @@ def get_knowledge_db_connection():
     finally:
         conn.close()
 
+@contextmanager  
+def get_db_connection():
+    """Get connection to the main database (defaults to risk dashboard database)"""
+    conn = sqlite3.connect(RISK_DB, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
 # ==========================================
 # UTILITY FUNCTIONS
 # ==========================================
@@ -617,6 +627,303 @@ async def get_dashboard_only_summary():
         raise HTTPException(status_code=500, detail=f"Database error11 (get_dashboard_only_summary): {str(e)}")
 
 # ==========================================
+# THEME-BASED ANALYTICS ENDPOINTS
+# ==========================================
+
+@app.get("/api/themes/statistics")
+async def get_theme_statistics():
+    """
+    Get financial risk theme distribution and statistics.
+    Returns article counts by theme for dashboard bar chart.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    primary_theme,
+                    theme_display_name,
+                    COUNT(*) as article_count,
+                    AVG(theme_confidence) as avg_confidence,
+                    AVG(overall_risk_score) as avg_risk_score,
+                    COUNT(CASE WHEN severity_level = 'Critical' THEN 1 END) as critical_count,
+                    COUNT(CASE WHEN is_market_moving = 1 THEN 1 END) as market_moving_count
+                FROM news_articles 
+                WHERE primary_theme IS NOT NULL 
+                    AND sentiment_score < 0  -- Only negative news
+                    AND processed_date >= datetime('now', '-7 days')  -- Last 7 days
+                GROUP BY primary_theme, theme_display_name
+                ORDER BY article_count DESC
+            """)
+            
+            themes = []
+            for row in cursor.fetchall():
+                themes.append({
+                    "theme_id": row["primary_theme"],
+                    "theme_name": row["theme_display_name"],
+                    "article_count": row["article_count"],
+                    "avg_confidence": round(row["avg_confidence"] or 0, 1),
+                    "avg_risk_score": round(row["avg_risk_score"] or 0, 1),
+                    "critical_count": row["critical_count"],
+                    "market_moving_count": row["market_moving_count"]
+                })
+            
+            return {
+                "themes": themes,
+                "total_themes": len(themes),
+                "total_articles": sum(theme["article_count"] for theme in themes),
+                "generated_at": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error (theme_statistics): {str(e)}")
+
+
+@app.get("/api/themes/{theme_id}/articles")
+async def get_theme_articles(
+    theme_id: str,
+    limit: int = Query(50, ge=1, le=200, description="Number of articles to return")
+):
+    """
+    Get articles for a specific theme.
+    Used for storyline generation and detailed analysis.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    id, headline, content, summary, source_name, published_date,
+                    primary_risk_category, secondary_risk_categories,
+                    severity_level, confidence_score, sentiment_score, overall_risk_score,
+                    theme_confidence, theme_keywords, countries, affected_markets,
+                    financial_exposure, is_market_moving, description
+                FROM news_articles 
+                WHERE primary_theme = ?
+                    AND sentiment_score < 0  -- Only negative news
+                    AND processed_date >= datetime('now', '-14 days')  -- Last 14 days
+                ORDER BY processed_date DESC, overall_risk_score DESC
+                LIMIT ?
+            """, [theme_id, limit])
+            
+            articles = []
+            for row in cursor.fetchall():
+                articles.append({
+                    "id": row["id"],
+                    "headline": row["headline"],
+                    "content": row["content"],
+                    "summary": row["summary"],
+                    "source_name": row["source_name"],
+                    "published_date": row["published_date"],
+                    "primary_risk_category": row["primary_risk_category"],
+                    "secondary_risk_categories": json.loads(row["secondary_risk_categories"] or "[]"),
+                    "severity_level": row["severity_level"],
+                    "confidence_score": row["confidence_score"],
+                    "sentiment_score": row["sentiment_score"],
+                    "overall_risk_score": row["overall_risk_score"],
+                    "theme_confidence": row["theme_confidence"],
+                    "theme_keywords": json.loads(row["theme_keywords"] or "[]"),
+                    "countries": json.loads(row["countries"] or "[]"),
+                    "affected_markets": json.loads(row["affected_markets"] or "[]"),
+                    "financial_exposure": row["financial_exposure"],
+                    "is_market_moving": bool(row["is_market_moving"]),
+                    "description": row["description"]
+                })
+            
+            # Get theme info
+            theme_cursor = conn.execute("""
+                SELECT theme_display_name 
+                FROM news_articles 
+                WHERE primary_theme = ? 
+                LIMIT 1
+            """, [theme_id])
+            
+            theme_info = theme_cursor.fetchone()
+            theme_name = theme_info["theme_display_name"] if theme_info else theme_id
+            
+            return {
+                "theme_id": theme_id,
+                "theme_name": theme_name,
+                "articles": articles,
+                "article_count": len(articles),
+                "generated_at": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error (theme_articles): {str(e)}")
+
+
+@app.post("/api/themes/{theme_id}/storyline")
+async def generate_theme_storyline(
+    theme_id: str,
+    max_articles: int = Query(50, ge=10, le=500, description="Maximum articles to analyze"),
+    days_back: int = Query(30, ge=1, le=90, description="Days to look back for articles")
+):
+    """
+    Generate a comprehensive risk storyline for a specific theme using enhanced LLM analysis.
+    Handles large article volumes with intelligent selection and creates detailed banking impact analysis.
+    """
+    try:
+        # Import enhanced storyline generation utilities
+        from enhanced_storyline_generator import (
+            smart_article_selection,
+            create_storyline_context,
+            generate_comprehensive_storyline_prompt,
+            create_downloadable_report_data
+        )
+        
+        # First, get ALL articles for this theme (not limited)
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    id, headline, content, summary, description, source_name,
+                    countries, affected_markets, financial_exposure, 
+                    severity_level, overall_risk_score, confidence_score,
+                    published_date, processed_date, theme_display_name,
+                    theme_confidence, theme_keywords, primary_risk_category,
+                    secondary_risk_categories, is_market_moving, is_breaking_news
+                FROM news_articles 
+                WHERE primary_theme = ?
+                    AND sentiment_score < 0  -- Only negative news
+                    AND processed_date >= datetime('now', '-{} days')
+                ORDER BY overall_risk_score DESC, published_date DESC
+            """.format(days_back), [theme_id])
+            
+            all_articles = cursor.fetchall()
+            
+            if not all_articles:
+                raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
+            
+            # Convert rows to dictionaries for easier handling
+            articles_data = []
+            for row in all_articles:
+                article_dict = dict(row)
+                # Parse JSON fields safely
+                if article_dict.get("countries"):
+                    try:
+                        article_dict["countries"] = json.loads(article_dict["countries"])
+                    except:
+                        article_dict["countries"] = []
+                
+                if article_dict.get("affected_markets"):
+                    try:
+                        article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
+                    except:
+                        article_dict["affected_markets"] = []
+                
+                if article_dict.get("theme_keywords"):
+                    try:
+                        article_dict["theme_keywords"] = json.loads(article_dict["theme_keywords"])
+                    except:
+                        article_dict["theme_keywords"] = []
+                
+                articles_data.append(article_dict)
+            
+            theme_name = articles_data[0]["theme_display_name"]
+            
+            print(f"🎯 Found {len(articles_data)} articles for theme: {theme_name}")
+            
+            # Use smart selection if we have too many articles
+            if len(articles_data) > max_articles:
+                selected_articles = smart_article_selection(articles_data, max_articles)
+                print(f"📊 Selected {len(selected_articles)} most representative articles")
+            else:
+                selected_articles = articles_data
+            
+            # Create comprehensive context for storyline
+            context = create_storyline_context(selected_articles, theme_name)
+            
+            # Generate enhanced LLM prompt
+            storyline_prompt = generate_comprehensive_storyline_prompt(context, selected_articles)
+            
+            print(f"🤖 Generating comprehensive storyline using LLM...")
+            
+            # Generate storyline using LLM
+            from util import llm_call
+            
+            storyline_response = llm_call(
+                messages=[{"role": "user", "content": storyline_prompt}],
+                model="gpt-4o-mini",
+                temperature=0.1
+            )
+            
+            storyline = storyline_response.strip()
+            
+            # Create downloadable report data
+            report_data = create_downloadable_report_data(storyline, context, selected_articles)
+            
+            # Store storyline in database for caching
+            with get_db_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO risk_storylines 
+                    (theme_id, theme_name, storyline, article_count, 
+                     affected_countries, affected_markets, generated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    theme_id, theme_name, storyline, len(selected_articles),
+                    json.dumps(context['geographic_scope']['countries'][:20]), 
+                    json.dumps(context['market_scope']['markets'][:20]),
+                    datetime.now().isoformat()
+                ])
+                conn.commit()
+            
+            return {
+                "theme_id": theme_id,
+                "theme_name": theme_name,
+                "storyline": storyline,
+                "context": context,
+                "report_data": report_data,
+                "metadata": {
+                    "articles_analyzed": len(articles_data),
+                    "articles_selected": len(selected_articles),
+                    "affected_countries": context['geographic_scope']['countries'][:10],
+                    "affected_markets": context['market_scope']['markets'][:10],
+                    "severity_distribution": context['severity_distribution'],
+                    "avg_risk_score": context['avg_risk_score'],
+                    "generation_date": datetime.now().isoformat()
+                }
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Storyline generation error: {str(e)}")
+
+
+@app.get("/api/storylines")
+async def get_recent_storylines():
+    """
+    Get recently generated storylines.
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    theme_id, theme_name, storyline, article_count, 
+                    affected_countries, affected_markets, generated_at
+                FROM risk_storylines 
+                ORDER BY generated_at DESC
+                LIMIT 10
+            """)
+            
+            storylines = []
+            for row in cursor.fetchall():
+                storylines.append({
+                    "theme_id": row["theme_id"],
+                    "theme_name": row["theme_name"],
+                    "storyline": row["storyline"],
+                    "article_count": row["article_count"],
+                    "affected_countries": json.loads(row["affected_countries"] or "[]"),
+                    "affected_markets": json.loads(row["affected_markets"] or "[]"),
+                    "generated_at": row["generated_at"]
+                })
+            
+            return {
+                "storylines": storylines,
+                "count": len(storylines),
+                "generated_at": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error (storylines): {str(e)}")
+
+# ==========================================
 # SERVER-SENT EVENTS (SSE) ENDPOINTS
 # ==========================================
 
@@ -1035,6 +1342,161 @@ async def root():
         }
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+@app.get("/api/themes/{theme_id}/storyline/download")
+async def download_storyline_report(theme_id: str):
+    """
+    Download storyline report in HTML format.
+    """
+    try:
+        from enhanced_storyline_generator import create_downloadable_report_data
+        
+        # Get the most recent storyline for this theme
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    theme_id, theme_name, storyline, article_count, 
+                    affected_countries, affected_markets, generated_at
+                FROM risk_storylines 
+                WHERE theme_id = ?
+                ORDER BY generated_at DESC
+                LIMIT 1
+            """, [theme_id])
+            
+            storyline_row = cursor.fetchone()
+            if not storyline_row:
+                raise HTTPException(status_code=404, detail=f"No storyline found for theme: {theme_id}")
+            
+            # Get related articles for the report
+            cursor = conn.execute("""
+                SELECT 
+                    id, headline, content, summary, source_name,
+                    countries, affected_markets, financial_exposure, 
+                    severity_level, overall_risk_score, published_date
+                FROM news_articles 
+                WHERE primary_theme = ?
+                    AND sentiment_score < 0
+                ORDER BY overall_risk_score DESC
+                LIMIT 25
+            """, [theme_id])
+            
+            articles = []
+            for row in cursor.fetchall():
+                article_dict = dict(row)
+                # Parse JSON fields
+                if article_dict.get("countries"):
+                    try:
+                        article_dict["countries"] = json.loads(article_dict["countries"])
+                    except:
+                        article_dict["countries"] = []
+                
+                if article_dict.get("affected_markets"):
+                    try:
+                        article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
+                    except:
+                        article_dict["affected_markets"] = []
+                
+                articles.append(article_dict)
+        
+        # Create report context
+        context = {
+            "theme_name": storyline_row["theme_name"],
+            "article_count": storyline_row["article_count"],
+            "date_range": {
+                "start": min(a.get("published_date", "") for a in articles) if articles else "",
+                "end": max(a.get("published_date", "") for a in articles) if articles else ""
+            },
+            "geographic_scope": {
+                "countries": json.loads(storyline_row["affected_countries"] or "[]"),
+                "country_count": len(json.loads(storyline_row["affected_countries"] or "[]")),
+                "cross_country_events": {}
+            },
+            "market_scope": {
+                "markets": json.loads(storyline_row["affected_markets"] or "[]"),
+                "market_count": len(json.loads(storyline_row["affected_markets"] or "[]")),
+                "cross_market_events": {}
+            },
+            "severity_distribution": {"Critical": 0, "High": 0, "Medium": 0, "Low": 0},
+            "avg_risk_score": sum(a.get("overall_risk_score", 0) for a in articles) / len(articles) if articles else 0,
+            "max_risk_score": max(a.get("overall_risk_score", 0) for a in articles) if articles else 0,
+            "timeline": []
+        }
+        
+        # Count severity levels
+        for article in articles:
+            severity = article.get("severity_level", "Low")
+            if severity in context["severity_distribution"]:
+                context["severity_distribution"][severity] += 1
+        
+        # Create comprehensive report data
+        report_data = create_downloadable_report_data(
+            storyline_row["storyline"], 
+            context, 
+            articles
+        )
+          # Generate HTML report
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Banking Risk Impact Assessment: {report_data['report_metadata']['title']}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 40px; }}
+                .header {{ border-bottom: 2px solid #333; padding-bottom: 20px; }}
+                .section {{ margin: 30px 0; }}
+                .metrics {{ background: #f5f5f5; padding: 15px; border-radius: 5px; }}
+                .article {{ border-left: 3px solid #007acc; padding-left: 15px; margin: 10px 0; }}
+                .critical {{ border-left-color: #d32f2f; }}
+                .high {{ border-left-color: #f57c00; }}
+                .medium {{ border-left-color: #fbc02d; }}
+                .low {{ border-left-color: #388e3c; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Banking Risk Impact Assessment: {report_data['report_metadata']['title']}</h1>
+                <p><strong>Report ID:</strong> {report_data['report_metadata']['report_id']}</p>
+                <p><strong>Generated:</strong> {report_data['report_metadata']['generated_at']}</p>
+                <p><strong>Classification:</strong> {report_data['report_metadata']['classification']}</p>
+            </div>
+            
+            <div class="section">
+                <h2>Executive Summary</h2>
+                <div class="metrics">
+                    <p><strong>Theme:</strong> {report_data['executive_summary']['theme']}</p>
+                    <p><strong>Articles Analyzed:</strong> {report_data['executive_summary']['article_count']}</p>
+                    <p><strong>Geographic Scope:</strong> {report_data['executive_summary']['geographic_scope']} countries</p>
+                    <p><strong>Average Risk Score:</strong> {report_data['executive_summary']['avg_risk_score']:.1f}/10</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Risk Impact Assessment</h2>
+                <div style="white-space: pre-line; line-height: 1.6;">
+                    {report_data['storyline_content']}
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Key Article References</h2>
+                {"".join([f'''
+                <div class="article {article['severity'].lower()}">
+                    <h4>{article['headline']}</h4>
+                    <p><strong>Date:</strong> {article['date']} | <strong>Severity:</strong> {article['severity']} | <strong>Risk Score:</strong> {article['risk_score']:.1f}</p>
+                    <p><strong>Source:</strong> {article['source']}</p>
+                </div>
+                ''' for article in report_data['article_references'][:10]])}
+            </div>
+        </body>
+        </html>
+        """
+            
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(
+            content=html_content,
+            headers={
+                "Content-Disposition": f"attachment; filename=risk_impact_assessment_{theme_id}_{datetime.now().strftime('%Y%m%d')}.html"
+            }
+        )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Report generation error: {str(e)}")

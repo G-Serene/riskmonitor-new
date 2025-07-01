@@ -32,6 +32,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RiskBreakdownPieChart } from "@/components/charts/risk-breakdown-pie-chart"
 import { QuickFilters } from "@/components/dashboard/quick-filters"
 import { AdvancedFilters } from "@/components/dashboard/advanced-filters"
+import { ThemeAnalytics } from "@/components/dashboard/theme-analytics"
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { useDashboardSSE } from "@/hooks/use-dashboard-sse"
 import { apiClient } from "@/lib/api-client"
@@ -326,9 +327,9 @@ export default function RiskDashboardContent() {
           </div>
         )}
 
-        {/* Full Screen Layout: News Feed Left Half, All Other Widgets Right Half */}
-        <div className="grid gap-4 lg:grid-cols-2 h-[calc(100vh-180px)]">
-          {/* Left Half - Live News Feed */}
+        {/* Full Screen Layout: News Feed Left, Charts Middle, Theme Analytics Right */}
+        <div className="grid gap-4 lg:grid-cols-3 h-[calc(100vh-180px)]">
+          {/* Left Third - Live News Feed */}
           <Card className="flex flex-col">
             <CardHeader>
               <div className="flex flex-row items-center justify-between">
@@ -431,6 +432,13 @@ export default function RiskDashboardContent() {
                         <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-800">
                           {item.primary_risk_category.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                         </Badge>
+
+                        {/* Theme Display */}
+                        {item.theme_display_name && (
+                          <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-800">
+                            🎯 {item.theme_display_name}
+                          </Badge>
+                        )}
                         
                         {/* Industry Sectors */}
                         {item.industry_sectors && (() => {
@@ -525,10 +533,10 @@ export default function RiskDashboardContent() {
             </CardContent>
           </Card>
           
-          {/* Right Half - All Other Widgets Stacked */}
+          {/* Middle Third - KPIs and Risk Breakdown */}
           <div className="flex flex-col gap-4">
-            {/* KPI Cards Grid - Now 3 cards in a row */}
-            <div className="grid gap-3 grid-cols-3">
+            {/* KPI Cards Grid - Now 2 cards in a row for better fit */}
+            <div className="grid gap-3 grid-cols-2">
               {/* Overall Risk Score */}
               <Card className="flex flex-col">
                 <CardHeader className="pb-2">
@@ -615,22 +623,25 @@ export default function RiskDashboardContent() {
                   </div>
                 </CardContent>
               </Card>
-
-              {/* Financial Exposure KPI removed as requested */}
             </div>
 
             {/* Risk Breakdown Chart - Compact */}
-            <Card className="h-[280px]">
+            <Card className="flex-1">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Risk Breakdown by Category</CardTitle>
                 <CardDescription className="text-xs">Distribution of identified risks.</CardDescription>
               </CardHeader>
-              <CardContent className="h-[210px]">
+              <CardContent className="flex-1">
                 <RiskBreakdownPieChart 
                   data={dashboardData.risk_breakdown || []} 
                 />
               </CardContent>
             </Card>
+          </div>
+
+          {/* Right Third - Theme Analytics */}
+          <div className="flex flex-col">
+            <ThemeAnalytics className="flex-1" />
           </div>
         </div>
       </main>

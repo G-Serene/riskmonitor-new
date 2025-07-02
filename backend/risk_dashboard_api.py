@@ -1241,12 +1241,25 @@ async def stream_dashboard_updates():
                     
                     news_data = []
                     for row in latest_news:
-                        formatted_article = format_news_article(row)
-                        minutes_ago = conn.execute("""
-                            SELECT CAST((julianday('now') - julianday(?)) * 24 * 60 AS INTEGER) as minutes_ago
-                        """, [row["published_date"]]).fetchone()["minutes_ago"]
-                        formatted_article["minutes_ago"] = minutes_ago
-                        news_data.append(formatted_article)
+                        try:
+                            formatted_article = format_news_article(row)
+                            minutes_ago = conn.execute("""
+                                SELECT CAST((julianday('now') - julianday(?)) * 24 * 60 AS INTEGER) as minutes_ago
+                            """, [row["published_date"]]).fetchone()["minutes_ago"]
+                            formatted_article["minutes_ago"] = minutes_ago
+                            news_data.append(formatted_article)
+                        except Exception as format_error:
+                            print(f"⚠️ Error formatting article {row.get('id', 'unknown')}: {format_error}")
+                            # Create a minimal article object for safety
+                            news_data.append({
+                                "id": row.get("id", 0),
+                                "headline": row.get("headline", "Unknown"),
+                                "source_name": row.get("source_name", "Unknown"),
+                                "published_date": row.get("published_date", ""),
+                                "severity_level": row.get("severity_level", "Low"),
+                                "primary_risk_category": row.get("primary_risk_category", "Unknown"),
+                                "minutes_ago": 0
+                            })
                     
                     # Emit news feed update
                     emit_news_feed_update(
@@ -1257,28 +1270,36 @@ async def stream_dashboard_updates():
                     # Cascade 2: Update dashboard summary
                     dashboard_summary = conn.execute("SELECT * FROM dashboard_summary").fetchone()
                     if dashboard_summary:
-                        emit_dashboard_summary_update(
-                            total_news_today=dashboard_summary["total_news_today"],
-                            critical_count=dashboard_summary["critical_count"],
-                            high_count=dashboard_summary["high_count"],
-                            medium_count=dashboard_summary["medium_count"],
-                            low_count=dashboard_summary["low_count"],
-                            avg_sentiment=dashboard_summary["avg_sentiment"],
-                            current_risk_score=dashboard_summary["current_risk_score"]
-                        )
+                        try:
+                            emit_dashboard_summary_update(
+                                total_news_today=dashboard_summary.get("total_news_today", 0),
+                                critical_count=dashboard_summary.get("critical_count", 0),
+                                high_count=dashboard_summary.get("high_count", 0),
+                                medium_count=dashboard_summary.get("medium_count", 0),
+                                low_count=dashboard_summary.get("low_count", 0),
+                                avg_sentiment=dashboard_summary.get("avg_sentiment", 0.0),
+                                current_risk_score=dashboard_summary.get("current_risk_score", 0.0)
+                            )
+                        except Exception as summary_error:
+                            print(f"⚠️ Error emitting dashboard summary: {summary_error}")
+                            print(f"Available keys: {list(dashboard_summary.keys()) if hasattr(dashboard_summary, 'keys') else 'No keys method'}")
                     
                     # Cascade 3: Update risk breakdown
                     risk_breakdown = conn.execute("SELECT * FROM dashboard_risk_breakdown").fetchall()
                     breakdown_data = []
                     for row in risk_breakdown:
-                        breakdown_data.append({
-                            "category": row["primary_risk_category"],
-                            "news_count": row["news_count"],
-                            "percentage": row["percentage"],
-                            "chart_color": row["chart_color"]
-                        })
+                        try:
+                            breakdown_data.append({
+                                "category": row.get("primary_risk_category", "Unknown"),
+                                "news_count": row.get("news_count", 0),
+                                "percentage": row.get("percentage", 0.0),
+                                "chart_color": row.get("chart_color", "#gray")
+                            })
+                        except Exception as breakdown_error:
+                            print(f"⚠️ Error processing risk breakdown row: {breakdown_error}")
                     
-                    emit_risk_breakdown_update(breakdown=breakdown_data)
+                    if breakdown_data:  # Only emit if we have valid data
+                        emit_risk_breakdown_update(breakdown=breakdown_data)
                 
                 elif original_event_type in ['risk_update', 'risk_score_update']:
                     # Get latest risk calculation

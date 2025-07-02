@@ -350,21 +350,7 @@ export function useDashboardSSE() {
       }
     })
 
-    // Sentiment updates
-    eventSource.addEventListener("sentiment_update", (event) => {
-      console.log("😊 [SSE] Sentiment update received:")
-      console.log("  - Raw data:", event.data)
-      const eventData = safeJsonParse(event.data, "sentiment_update")
-      if (eventData) {
-        console.log("  - Parsed data:", eventData)
-        setData((prev) => ({
-          ...prev,
-          sentimentAnalysis: eventData,
-        }))
-        setStatus((prev) => ({ ...prev, lastUpdate: eventData.timestamp }))
-        console.log("✅ [SSE] Sentiment analysis updated in state")
-      }
-    })
+
 
     // Risk breakdown updates
     eventSource.addEventListener("risk_breakdown_update", (event) => {

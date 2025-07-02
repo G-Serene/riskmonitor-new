@@ -1,5 +1,38 @@
+# =============================================================================
+# RISK MONITORING DASHBOARD - BACKEND REQUIREMENTS
+# =============================================================================
+
+# Web Framework & API
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 sse-starlette==1.6.5
-python-dotenv==1.0.0
 python-multipart==0.0.6
+
+# LLM Integration
+openai>=1.0.0
+
+# Task Queue & Background Processing
+huey>=2.4.5
+
+# Environment & Configuration
+python-dotenv==1.0.0
+
+# Database (SQLite comes with Python, but for completeness)
+# sqlite3 is included in Python standard library
+
+# Standard Library Dependencies (included for reference)
+# The following are part of Python standard library:
+# - sqlite3
+# - json
+# - asyncio
+# - os
+# - datetime
+# - typing
+# - contextlib
+# - threading
+# - xml.etree.ElementTree
+# - xml.dom.minidom
+# - sys
+# - time
+# - random
+# - re

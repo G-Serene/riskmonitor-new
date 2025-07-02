@@ -1,11 +1,35 @@
 // API client for backend integration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
+export type TimeWindow = "1h" | "6h" | "24h" | "today" | "7d" | "custom"
+
+export interface TimeWindowOption {
+  value: TimeWindow
+  label: string
+  description: string
+}
+
+export const TIME_WINDOW_OPTIONS: TimeWindowOption[] = [
+  { value: "1h", label: "Last Hour", description: "Past 60 minutes" },
+  { value: "6h", label: "Last 6 Hours", description: "Past 6 hours" },
+  { value: "24h", label: "Last 24 Hours", description: "Past 24 hours" },
+  { value: "today", label: "Today", description: "Current day (midnight to now)" },
+  { value: "7d", label: "Past Week", description: "Past 7 days" },
+  { value: "custom", label: "Custom Range", description: "Select specific date range" },
+]
+
+export interface DateRange {
+  from?: Date
+  to?: Date
+}
+
 export interface NewsArticle {
   id: number
   headline: string
+  content?: string  // Full article content
   summary: string
   source_name: string
+  source_url?: string  // Original source URL
   published_date: string
   severity_level: "Critical" | "High" | "Medium" | "Low"
   primary_risk_category: string
@@ -32,6 +56,8 @@ export interface NewsArticle {
   theme_display_name?: string
   theme_confidence?: number
   theme_keywords?: string[]
+  // Historical impact analysis
+  historical_impact_analysis?: string  // LLM-generated analysis of similar past events' impact on international banks
 }
 
 export interface DashboardSummary {
@@ -41,6 +67,8 @@ export interface DashboardSummary {
   total_news_today: number
   critical_count: number
   high_count: number
+  medium_count: number
+  low_count: number
   avg_sentiment: number
   current_risk_score: number
 }
@@ -85,6 +113,8 @@ export interface DashboardData {
   geographic_risk: GeographicRisk[]
   generated_at: string
   cache_timestamp?: string
+  time_window?: TimeWindow
+  time_window_description?: string
 }
 
 export interface NewsResponse {
@@ -194,8 +224,11 @@ export interface RecentStorylinesResponse {
     storyline: string
     generated_at: string
     article_count: number
+    affected_countries: string[]
+    affected_markets: string[]
   }>
-  total_count: number
+  count: number
+  generated_at: string
 }
 
 class ApiClient {
@@ -247,8 +280,23 @@ class ApiClient {
   }
 
   // Dashboard endpoints
-  async getDashboardData(): Promise<DashboardData> {
-    return this.get<DashboardData>("/api/risk/dashboard")
+  async getDashboardData(timeWindow?: TimeWindow, dateRange?: DateRange): Promise<DashboardData> {
+    const params: Record<string, any> = {}
+    
+    if (timeWindow) {
+      params.time_window = timeWindow
+    }
+    
+    if (timeWindow === "custom" && dateRange) {
+      if (dateRange.from) {
+        params.from_date = dateRange.from.toISOString().split('T')[0]
+      }
+      if (dateRange.to) {
+        params.to_date = dateRange.to.toISOString().split('T')[0]
+      }
+    }
+    
+    return this.get<DashboardData>("/api/risk/dashboard", Object.keys(params).length > 0 ? params : undefined)
   }
 
   // News endpoints
@@ -263,8 +311,23 @@ class ApiClient {
     return this.get<NewsResponse>("/api/news/latest", params)
   }
 
-  async getNewsFeed(limit = 20): Promise<{ articles: NewsArticle[]; count: number; generated_at: string }> {
-    return this.get("/api/news/feed", { limit })
+  async getNewsFeed(limit = 20, timeWindow?: TimeWindow, dateRange?: DateRange): Promise<{ articles: NewsArticle[]; count: number; generated_at: string }> {
+    const params: Record<string, any> = { limit }
+    
+    if (timeWindow) {
+      params.time_window = timeWindow
+    }
+    
+    if (timeWindow === "custom" && dateRange) {
+      if (dateRange.from) {
+        params.from_date = dateRange.from.toISOString().split('T')[0]
+      }
+      if (dateRange.to) {
+        params.to_date = dateRange.to.toISOString().split('T')[0]
+      }
+    }
+    
+    return this.get("/api/news/feed", params)
   }
 
   async getNewsArticle(id: number): Promise<NewsArticle> {
@@ -299,13 +362,14 @@ class ApiClient {
   async generateThemeStoryline(
     themeId: string, 
     maxArticles: number = 50, 
-    daysBack: number = 30
+    daysBack: number = 30,
+    forceRegenerate: boolean = true
   ): Promise<StorylineResponse> {
-    return this.post<StorylineResponse>(`/api/themes/${themeId}/storyline?max_articles=${maxArticles}&days_back=${daysBack}`, {})
+    return this.post<StorylineResponse>(`/api/themes/${themeId}/storyline?max_articles=${maxArticles}&days_back=${daysBack}&force_regenerate=${forceRegenerate}`, {})
   }
 
   async downloadStorylineReport(themeId: string) {
-    const url = `${this.baseUrl}/api/themes/${themeId}/storyline/download?format=pdf`
+    const url = `${this.baseUrl}/api/themes/${themeId}/storyline/download`
     
     try {
       const response = await fetch(url, {
@@ -319,28 +383,64 @@ class ApiClient {
         throw new Error(`Download failed: ${response.status} ${response.statusText}`)
       }
 
-      // Create download
-      const blob = await response.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = downloadUrl
+      // Get HTML content
+      const htmlContent = await response.text()
       
-      // Extract filename from Content-Disposition header or create default
-      const contentDisposition = response.headers.get('Content-Disposition')
-      let filename = `risk_impact_assessment_${themeId}_${new Date().toISOString().split('T')[0]}.html`
+      // Convert HTML to PDF using jsPDF and html2canvas
+      const { default: jsPDF } = await import('jspdf')
+      const { default: html2canvas } = await import('html2canvas')
       
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename=(.+)/)
-        if (filenameMatch) {
-          filename = filenameMatch[1].replace(/"/g, '')
-        }
+      // Create a temporary container for the HTML content
+      const tempContainer = document.createElement('div')
+      tempContainer.innerHTML = htmlContent
+      tempContainer.style.position = 'absolute'
+      tempContainer.style.left = '-9999px'
+      tempContainer.style.width = '210mm' // A4 width
+      tempContainer.style.padding = '20mm'
+      tempContainer.style.fontFamily = 'Arial, sans-serif'
+      tempContainer.style.backgroundColor = 'white'
+      document.body.appendChild(tempContainer)
+
+      // Wait a bit for styles to apply
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Convert to canvas
+      const canvas = await html2canvas(tempContainer, {
+        scale: 2, // Higher quality
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff'
+      })
+
+      // Remove temp container
+      document.body.removeChild(tempContainer)
+
+      // Create PDF
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      
+      const imgWidth = 210 // A4 width in mm
+      const pageHeight = 295 // A4 height in mm  
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      let heightLeft = imgHeight
+
+      let position = 0
+
+      // Add first page
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+
+      // Add additional pages if needed
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
       }
-      
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(downloadUrl)
+
+      // Download PDF
+      const filename = `risk_impact_assessment_${themeId}_${new Date().toISOString().split('T')[0]}.pdf`
+      pdf.save(filename)
       
       return { success: true, filename }
     } catch (error) {

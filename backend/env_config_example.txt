@@ -1,0 +1,36 @@
+# Risk Dashboard Environment Configuration  
+# Refactored to use only Evaluator-Optimizer pattern following Anthropic cookbook
+# Copy this to .env and customize for your environment
+
+# API Configuration (REQUIRED)
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Database Configuration  
+RISK_DB=risk_dashboard.db
+KNOWLEDGE_DB=risk_dashboard.db
+
+# Processing Configuration
+MAX_RETRIES=3
+RETRY_DELAY=60
+BATCH_SIZE=100
+
+# Connection Pool Configuration
+MAX_CONNECTIONS=5
+CONNECTION_TIMEOUT=30
+
+# Evaluator-Optimizer Workflow Configuration
+# NOTE: Fallback logic has been removed - only evaluator-optimizer pattern is used
+# Maximum number of optimization iterations (balance between quality and speed)
+# Recommended: 2-3 for production, higher for testing
+MAX_OPTIMIZATION_ITERATIONS=2
+
+# Usage Notes:
+# - All news articles now use the Evaluator-Optimizer pattern
+# - No fallback to basic analysis - failures are handled by Huey retries
+# - If all retries fail, processing halts with error message
+# - Clean implementation following Anthropic "Building Effective Agents" cookbook
+
+# Development/Testing Configuration
+# Set to false in production
+DEBUG_MODE=false
+LOG_OPTIMIZATION_DETAILS=true

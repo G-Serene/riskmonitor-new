@@ -36,7 +36,7 @@ export interface FilterPreset {
 export const DEFAULT_FILTERS: RiskFilters = {
   riskScoreRange: [0, 10],
   severityLevels: [],
-  timeRange: '24h',
+  timeRange: 'all', // Don't filter by time on frontend since backend already does it
   breakingNewsOnly: false,
   industrySectors: [],
   countries: [],

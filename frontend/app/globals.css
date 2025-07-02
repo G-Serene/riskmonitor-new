@@ -108,7 +108,41 @@
   * {
     @apply border-border;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground;
+    height: 100%;
+    overflow: hidden;
   }
+}
+
+/* Custom scroll behavior for dashboard */
+.news-feed-scroll {
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Ensure the body and html don't scroll for the dashboard */
+.dashboard-container {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Enhanced scrollbar styling for better visibility */
+.news-feed-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.news-feed-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.news-feed-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 4px;
+}
+
+.news-feed-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }

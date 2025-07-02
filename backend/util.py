@@ -1,6 +1,6 @@
 """
 Utility functions for LLM calls and XML extraction following the Anthropic cookbook pattern
-but using OpenAI as the backend.
+but supporting both OpenAI and Azure OpenAI as backends.
 """
 
 import openai
@@ -15,17 +15,61 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv(override=True)  # Force reload environment variables
 
-# Initialize OpenAI client with API key from environment
-client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# Initialize LLM client based on provider configuration
+def _initialize_llm_client():
+    """Initialize the appropriate OpenAI client based on configuration"""
+    provider = os.getenv('LLM_PROVIDER', 'openai').lower()
+    
+    if provider == 'azure':
+        # Azure OpenAI configuration
+        api_key = os.getenv('AZURE_OPENAI_API_KEY')
+        endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
+        api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
+        
+        if not api_key or not endpoint:
+            raise ValueError(
+                "Azure OpenAI configuration incomplete. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT"
+            )
+        
+        print(f"🔧 Initializing Azure OpenAI client - Endpoint: {endpoint}")
+        return openai.AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=api_version
+        )
+    else:
+        # Standard OpenAI configuration
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable")
+        
+        print(f"🔧 Initializing OpenAI client")
+        return openai.OpenAI(api_key=api_key)
+
+# Initialize the client
+client = _initialize_llm_client()
+
+def get_model_name() -> str:
+    """Get the model name based on provider configuration"""
+    provider = os.getenv('LLM_PROVIDER', 'openai').lower()
+    
+    if provider == 'azure':
+        # For Azure, use the deployment name
+        deployment_name = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o')
+        return deployment_name
+    else:
+        # For OpenAI, use the model name directly
+        model_name = os.getenv('LLM_MODEL', 'gpt-4o')
+        return model_name
 
 
-def llm_call(messages: list, model: str = "gpt-4o", temperature: float = 0.1) -> str:
+def llm_call(messages: list, model: str = None, temperature: float = 0.1) -> str:
     """
-    Make a call to OpenAI's API with consistent error handling.
+    Make a call to OpenAI's API (or Azure OpenAI) with consistent error handling.
     
     Args:
         messages: List of message dictionaries with 'role' and 'content'
-        model: OpenAI model to use
+        model: Model/deployment name to use (if None, uses configured default)
         temperature: Sampling temperature
         
     Returns:
@@ -35,15 +79,25 @@ def llm_call(messages: list, model: str = "gpt-4o", temperature: float = 0.1) ->
         Exception: If the API call fails (to be handled by Huey retries)
     """
     try:
+        # Use configured model if none specified
+        if model is None:
+            model = get_model_name()
+        
+        provider = os.getenv('LLM_PROVIDER', 'openai').lower()
+        
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature
         )
+        
         return response.choices[0].message.content
+        
     except Exception as e:
+        provider = os.getenv('LLM_PROVIDER', 'openai').lower()
+        provider_name = "Azure OpenAI" if provider == 'azure' else "OpenAI"
         # Let Huey handle retries - just re-raise the exception
-        raise Exception(f"OpenAI API call failed: {str(e)}")
+        raise Exception(f"{provider_name} API call failed: {str(e)}")
 
 
 def extract_xml(text: str, tag: str) -> Optional[str]:

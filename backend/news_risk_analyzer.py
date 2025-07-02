@@ -5,12 +5,13 @@ pip install huey openai python-dotenv
 Usage:
 1. python news_risk_analyzer.py          # Queue all news (publisher)
 2. python -m huey.bin.huey_consumer news_risk_analyzer.huey  # Start worker
-3. Open http://localhost:8080 for web monitoring UI
+3. Open http://localhost:8080 for Huey monitoring UI (not the main API)
+
+Note: Main API runs on http://localhost:8000 (risk_dashboard_api.py)
 """
 
 import sqlite3
 import json
-import openai
 import os
 from datetime import datetime
 from huey import SqliteHuey, crontab
@@ -28,8 +29,20 @@ load_dotenv()
 class Config:
     """Centralized configuration management"""
     
-    # API Configuration
+    # LLM Provider Configuration
+    LLM_PROVIDER = os.getenv('LLM_PROVIDER', 'openai').lower()
+    
+    # OpenAI Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    
+    # Azure OpenAI Configuration
+    AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
+    AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
+    AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
+    AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o')
+    
+    # Model Configuration
+    LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4o')
     
     # Database Configuration
     RISK_DB = os.getenv('RISK_DB', 'risk_dashboard.db')
@@ -44,11 +57,18 @@ class Config:
     MAX_CONNECTIONS = int(os.getenv('MAX_CONNECTIONS', '5'))
     CONNECTION_TIMEOUT = int(os.getenv('CONNECTION_TIMEOUT', '30'))
     
+    # Evaluator-Optimizer Configuration
+    MAX_OPTIMIZATION_ITERATIONS = int(os.getenv('MAX_OPTIMIZATION_ITERATIONS', '2'))
+    
     @classmethod
     def validate(cls):
         """Validate required configuration"""
-        if not cls.OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY environment variable not set")
+        if cls.LLM_PROVIDER == 'azure':
+            if not cls.AZURE_OPENAI_API_KEY or not cls.AZURE_OPENAI_ENDPOINT:
+                raise ValueError("Azure OpenAI configuration incomplete. Please set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT")
+        else:
+            if not cls.OPENAI_API_KEY:
+                raise ValueError("OPENAI_API_KEY environment variable not set")
         return True
 
 # Validate configuration on startup
@@ -148,8 +168,8 @@ def get_knowledge_db_connection():
 # IMPORTANT: Use consistent name to avoid __main__ vs module_name conflicts
 huey = SqliteHuey(name='news_risk_analyzer', filename='news_processing_queue.db')
 
-# Configure OpenAI
-openai.api_key = Config.OPENAI_API_KEY
+# Configure OpenAI - using new client pattern (handled in util.py)
+# No need to set openai.api_key here as util.py handles OpenAI client initialization
 
 # Remove duplicate database configuration (already defined in Config class)
 # RISK_DB = 'risk_dashboard.db'
@@ -162,7 +182,8 @@ openai.api_key = Config.OPENAI_API_KEY
 @huey.task(retries=Config.MAX_RETRIES, retry_delay=Config.RETRY_DELAY)
 def process_news_article(news_data):
     """
-    Process news article with OpenAI analysis using connection pooling
+    Process news article using Evaluator-Optimizer pattern for improved risk analysis quality.
+    No fallback logic - errors are handled by Huey retries as per Anthropic cookbook pattern.
     
     Args:
         news_data (dict): Complete news data from knowledge store
@@ -174,101 +195,58 @@ def process_news_article(news_data):
     
     Returns:
         str: Processing result message
+        
+    Raises:
+        Exception: If risk analysis fails (handled by Huey retries)
     """
     print(f"🔄 Processing news {news_data['newsId']}: {news_data['headline'][:50]}...")
     
     try:
         # ==========================================
-        # STEP 1: OpenAI Risk Analysis
+        # STEP 1: Risk Analysis using Evaluator-Optimizer Pattern
         # ==========================================
         
-        response = openai.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{
-                "role": "system",
-                "content": """You are a financial risk analyst specializing in international BANK and only consider financial risk.
-                Analyze news articles for negative news that is related to financial risk only, provide below JSON. Return ONLY valid JSON."""
-            }, {
-                "role": "user", 
-                "content": f"""
-                Analyze this banking news for risk impact:
-                
-                Headline: {news_data['headline']}
-                Content: {news_data['story'][:2000]}
-                Source: {news_data['newsSource']}
-                
-                Return JSON with exactly these fields:
-                {{
-                    "risk_category": "market_risk|credit_risk|operational_risk|liquidity_risk",
-                    "risk_subcategories": ["interest_rate_risk", "currency_risk"],
-                    "severity_level": "Critical|High|Medium|Low",
-                    "urgency_level": "Critical|High|Medium|Low", 
-                    "temporal_impact": "Immediate|Short-term|Medium-term|Long-term",
-                    "sentiment_score": -0.8,
-                    "confidence_score": 85,
-                    "impact_score": 75,
-                    "financial_exposure": 1500000000,
-                    "risk_contribution": 15.5,
-                    "geographic_regions": ["europe", "north_america", "asia_pacific"],
-                    "industry_sectors": ["financial_services"],
-                    "countries": ["Germany", "France"],
-                    "coordinates": {{"lat": 51.1657, "lng": 10.4515}},
-                    "affected_markets": ["DAX", "CAC40"],
-                    "keywords": ["ecb", "interest_rates", "banking", "inflation"],
-                    "entities": ["European Central Bank", "Christine Lagarde"],
-                    "is_market_moving": true,
-                    "is_breaking_news": false,
-                    "is_regulatory": true,
-                    "requires_action": true,
-                    "summary": "Brief summary of the risk impact for dashboard display",
-                    "description": "Detailed justification explaining why this risk category, subcategory, severity level, confidence score, is_market_moving and requires_action were assigned based on the news content and banking risk factors"
-                }}
-                
-                IMPORTANT GUIDELINES:
-                - financial_exposure: Estimate in USD (use 0 if no financial impact)
-                  WARNING: This is an AI ESTIMATE based on news content analysis, not actual bank data
-                  For illustrative purposes only - should not be used for real risk management decisions
-                - countries: List specific countries mentioned (max 5)
-                - coordinates: Provide lat/lng for the PRIMARY country (the most impacted one)
-                - keywords: Extract 5-10 key financial terms (lowercase)
-                - entities: Extract 3-8 key people/organizations mentioned
-                - geographic_regions: Include ALL affected regions from ["global", "north_america", "europe", "asia_pacific", "emerging_markets"]
-                  * Use "global" for worldwide impact (Fed decisions, global banking crises)
-                  * Use specific regions for regional impact (ECB = europe, BOJ = asia_pacific)
-                  * Include multiple regions if news affects interconnected markets
-                - industry_sectors: e.g. ["financial_services", "technology", "energy", "healthcare", "government"]
-                - is_market_moving: Set to TRUE only if the news significantly impacts financial markets:
-                  * Central bank policy changes (interest rates, QE, monetary policy)
-                  * Major bank failures, bailouts, or systemic banking issues
-                  * Regulatory changes affecting entire financial sectors
-                  * Trade wars, tariff announcements, or major trade policy changes
-                  * Geopolitical events with clear financial market implications
-                  * Major economic indicators significantly above/below expectations
-                  * Currency crises or major forex interventions
-                  * Credit rating downgrades of major institutions or sovereigns
-                - requires_action: Set to TRUE only if immediate risk management action is needed:
-                  * Direct impact on bank operations, exposures, or regulatory compliance
-                  * Tariff changes affecting bank's trade finance or client exposures
-                  * Events affecting key counterparties or markets with significant bank exposure
-                  * Regulatory deadlines or compliance requirements with immediate effect
-                  * Critical severity + immediate temporal impact + high confidence
-                  * Operational risks requiring immediate mitigation (cyber attacks, fraud)
-                  * Market disruptions affecting bank's trading or liquidity positions
-                - description: Provide a 2-3 sentence detailed justification explaining:
-                  * WHY you chose this specific risk_category (market_risk vs credit_risk etc.)
-                  * WHY you assigned this severity_level (Critical/High/Medium/Low)
-                  * WHY this confidence_score reflects your certainty in the analysis
-                  * Key banking risk factors identified in the news content
-                  * If is_market_moving=true, explain the specific market impact mechanism in description 
-                  * If requires_action=true, explain what type of action is needed in description 
-                """
-            }],
-            temperature=0.1,  # Low temperature for consistent analysis
-            
+        from evaluator_optimizer import process_news_with_evaluator_optimizer
+        from financial_risk_themes import classify_news_theme
+        
+        print(f"🎯 Using Evaluator-Optimizer pattern for risk analysis")
+        
+        # Use Evaluator-Optimizer pattern - let exceptions bubble up to Huey
+        risk_analysis = process_news_with_evaluator_optimizer(
+            news_data, 
+            max_iterations=Config.MAX_OPTIMIZATION_ITERATIONS
         )
         
-        # Parse OpenAI response
-        risk_analysis = json.loads(response.choices[0].message.content)
+        # ==========================================
+        # STEP 1.5: Theme Classification
+        # ==========================================
+        
+        print(f"🏷️ Classifying news into financial risk themes")
+        
+        # Extract all risk categories for theme classification
+        all_risk_categories = [risk_analysis.get('primary_risk_category', 'market_risk')] + \
+                             risk_analysis.get('secondary_risk_categories', [])
+        
+        # Classify into theme
+        theme_result = classify_news_theme(
+            news_data['headline'], 
+            news_data['story'], 
+            all_risk_categories
+        )
+        
+        # Add theme information to risk analysis
+        risk_analysis['primary_theme'] = theme_result['primary_theme']
+        risk_analysis['theme_display_name'] = theme_result['theme_display_name'] 
+        risk_analysis['theme_confidence'] = theme_result['confidence']
+        risk_analysis['theme_keywords'] = theme_result.get('matched_keywords', [])
+        
+        print(f"🎯 Theme classified: {theme_result['theme_display_name']} ({theme_result['confidence']}% confidence)")
+        
+        # Log optimization results if metadata exists
+        if '_optimization_meta' in risk_analysis:
+            optimization_meta = risk_analysis.pop('_optimization_meta')
+            print(f"📈 Optimization completed: {optimization_meta['iterations_used']} iterations, "
+                  f"final status: {optimization_meta['final_evaluation']}")
         
         # ==========================================
         # STEP 2: Save to Risk Dashboard Database (Using Connection Pool)
@@ -288,7 +266,7 @@ def process_news_article(news_data):
             cursor = risk_conn.execute("""
                 INSERT INTO news_articles (
                     headline, content, summary, source_name, published_date, processed_date,
-                    risk_categories, risk_subcategories, primary_risk_category,
+                    risk_categories, risk_subcategories, primary_risk_category, secondary_risk_categories,
                     geographic_regions, industry_sectors, countries, coordinates, affected_markets,
                     severity_level, confidence_score, sentiment_score, impact_score, overall_risk_score,
                     financial_exposure, exposure_currency, risk_contribution,
@@ -297,10 +275,12 @@ def process_news_article(news_data):
                     risk_color, display_priority, alert_sent, alert_type,
                     view_count, engagement_score, similar_news_count,
                     status, keywords, entities, tags, description,
+                    primary_theme, theme_display_name, theme_confidence, theme_keywords,
+                    historical_impact_analysis,
                     created_at, updated_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?,
@@ -309,6 +289,8 @@ def process_news_article(news_data):
                     ?, ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?,
                     ?, ?
                 )
             """, [
@@ -320,10 +302,13 @@ def process_news_article(news_data):
                 news_data['creationTimestamp'],  # Use original timestamp from raw_news_data (already in Z format)
                 news_data['creationTimestamp'],  # processed_date - use original creation timestamp
                 
-                # Risk classifications (9 fields)
-                json.dumps([risk_analysis['risk_category']]),
+                # Risk classifications (10 fields - updated for new schema)
+                # Create comprehensive risk_categories array with both primary and secondary
+                json.dumps([risk_analysis.get('primary_risk_category', risk_analysis.get('risk_category', 'market_risk'))] + 
+                          risk_analysis.get('secondary_risk_categories', [])),
                 json.dumps(risk_analysis.get('risk_subcategories', [])),
-                risk_analysis['risk_category'],
+                risk_analysis.get('primary_risk_category', risk_analysis.get('risk_category', 'market_risk')),
+                json.dumps(risk_analysis.get('secondary_risk_categories', [])),
                 json.dumps(risk_analysis.get('geographic_regions', [])),
                 json.dumps(risk_analysis.get('industry_sectors', ['financial_services'])),
                 json.dumps(risk_analysis.get('countries', [])),
@@ -371,6 +356,15 @@ def process_news_article(news_data):
                 json.dumps([]),  # tags
                 risk_analysis.get('description', 'LLM analysis justification not provided'),  # description
                 
+                # Theme classification (4 fields)
+                risk_analysis.get('primary_theme', 'other_financial_risks'),
+                risk_analysis.get('theme_display_name', 'Other Financial Risks'),
+                risk_analysis.get('theme_confidence', 30),
+                json.dumps(risk_analysis.get('theme_keywords', [])),
+                
+                # Historical impact analysis (1 field)
+                risk_analysis.get('historical_impact_analysis', 'Historical impact analysis not available'),
+                
                 # Timestamps (2 fields)
                 news_data['creationTimestamp'],  # created_at - use original creation timestamp
                 news_data['creationTimestamp']   # updated_at - use original creation timestamp
@@ -389,24 +383,65 @@ def process_news_article(news_data):
         # Market exposure calculation has been removed as requested
         
         # ==========================================
-        # STEP 4: Update daily risk calculation (if needed)
+        # STEP 4: Mark news as processed in raw_news_data (EARLY)
         # ==========================================
         
-        # Update daily risk calculation if this is high-impact news
-        if risk_analysis.get('financial_exposure', 0) > 500000000 or risk_analysis['severity_level'] in ['Critical', 'High']:
-            update_daily_risk_calculation()
+        # Mark as processed early to prevent reprocessing even if later steps fail
+        try:
+            with get_knowledge_db_connection() as knowledge_conn:
+                print(f"🔄 Marking news {news_data['newsId']} as processed...")
+                result = knowledge_conn.execute("""
+                    UPDATE raw_news_data 
+                    SET processed = 1, processed_at = CURRENT_TIMESTAMP 
+                    WHERE news_id = ?
+                """, [news_data['newsId']])
+                
+                if result.rowcount == 0:
+                    print(f"⚠️ Warning: No rows updated for news_id {news_data['newsId']} - ID might not exist in raw_news_data")
+                else:
+                    print(f"✅ Marked news {news_data['newsId']} as processed (updated {result.rowcount} row)")
+                
+                knowledge_conn.commit()
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to mark news as processed: {e}")
+            # Don't raise - continue with processing
         
         # ==========================================
-        # STEP 5: Mark news as processed in raw_news_data
+        # STEP 5: Update daily risk calculation (real-time)
         # ==========================================
         
-        with get_knowledge_db_connection() as knowledge_conn:
-            knowledge_conn.execute("""
-                UPDATE raw_news_data 
-                SET processed = 1, processed_at = CURRENT_TIMESTAMP 
-                WHERE news_id = ?
-            """, [news_data['newsId']])
-            knowledge_conn.commit()
+        # Always update daily risk calculation after processing any news (real-time)
+        # This ensures the dashboard always has current risk data immediately
+        try:
+            calculate_daily_risk_score()
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to update daily risk calculation: {e}")
+            # Don't raise - continue with processing
+        
+        # ==========================================
+        # STEP 6: Trigger SSE event for real-time frontend updates
+        # ==========================================
+        
+        # Insert SSE event to notify frontend of new news
+        try:
+            with get_risk_db_connection() as risk_conn:
+                risk_conn.execute("""
+                    INSERT INTO sse_events (event_type, event_data, created_at)
+                    VALUES ('news_update', ?, datetime('now'))
+                """, [json.dumps({
+                    'news_id': risk_db_id,
+                    'headline': news_data['headline'],
+                    'severity_level': risk_analysis['severity_level'],
+                    'source_name': news_data['newsSource'],
+                    'published_date': news_data['creationTimestamp'],
+                    'action': 'news_processed'
+                })])
+                risk_conn.commit()
+            
+            print(f"📡 SSE event triggered for news ID {risk_db_id}")
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to trigger SSE event: {e}")
+            # Don't raise - continue with processing
         
         print(f"✅ Completed news {news_data['newsId']} → Risk DB ID {risk_db_id} - Risk: {risk_analysis['severity_level']}")
         return f"Successfully processed news {news_data['newsId']} (Risk DB ID: {risk_db_id})"
@@ -421,10 +456,12 @@ def process_news_article(news_data):
         print(f"❌ {error_msg}")
         raise
 
-@huey.task(retries=2)
-def update_daily_risk_calculation():
-    """Calculate and update the daily overall risk score using connection pooling"""
-    print("📊 Updating daily risk calculation...")
+def calculate_daily_risk_score():
+    """
+    Calculate and update the daily overall risk score (direct execution)
+    This is called immediately after processing news for real-time updates
+    """
+    print("📊 Updating daily risk calculation (real-time)...")
     
     try:
         with get_risk_db_connection() as risk_conn:
@@ -531,16 +568,14 @@ def update_daily_risk_calculation():
             
             # Get top keywords
             top_keywords = risk_conn.execute("""
-                SELECT keyword, COUNT(*) as frequency
-                FROM (
-                    SELECT value as keyword
-                    FROM news_articles, json_each(keywords)
-                    WHERE DATE(published_date) = ?
-                      AND severity_level IN ('Critical', 'High')
-                      AND keywords IS NOT NULL
-                ) 
-                WHERE keyword IS NOT NULL
-                GROUP BY keyword
+                SELECT value as keyword, COUNT(*) as frequency
+                FROM news_articles
+                CROSS JOIN json_each(news_articles.keywords)
+                WHERE DATE(published_date) = ?
+                  AND severity_level IN ('Critical', 'High')
+                  AND keywords IS NOT NULL
+                  AND value IS NOT NULL
+                GROUP BY value
                 ORDER BY frequency DESC
                 LIMIT 2
             """, [latest_date]).fetchall()
@@ -567,14 +602,107 @@ def update_daily_risk_calculation():
             
             risk_conn.commit()
             
+            # Trigger SSE event for risk calculation update
+            risk_conn.execute("""
+                INSERT INTO sse_events (event_type, event_data, created_at)
+                VALUES ('risk_update', ?, datetime('now'))
+            """, [json.dumps({
+                'calculation_date': latest_date,
+                'overall_risk_score': round(overall_risk_score, 1),
+                'risk_trend': risk_trend,
+                'contributing_factors': contributing_factors,
+                'action': 'risk_calculation_updated'
+            })])
+            risk_conn.commit()
+            
             print(f"✅ Updated daily risk calculation: Score={overall_risk_score:.1f}, Trend={risk_trend} (based on {latest_date})")
             print(f"   Contributing factors: {', '.join(contributing_factors)}")
+            print(f"📡 SSE event triggered for risk calculation update")
             
             return f"Daily risk calculation updated: {overall_risk_score:.1f} ({risk_trend}) for {latest_date}"
         
     except Exception as e:
         print(f"❌ Failed to update daily risk calculation: {e}")
         raise
+
+@huey.task(retries=2)
+def update_daily_risk_calculation():
+    """
+    Huey task wrapper for daily risk calculation (for periodic/background processing)
+    """
+    return calculate_daily_risk_score()
+
+# ==========================================
+# PERIODIC TASKS: Automated processing
+# ==========================================
+
+@huey.periodic_task(crontab(minute='*'))
+def auto_process_news():
+    """
+    Periodic task: Automatically process unprocessed news every minute
+    This ensures continuous processing without manual intervention
+    """
+    print("🔄 Auto-processing: Checking for unprocessed news...")
+    
+    try:
+        # Check for unprocessed news
+        with get_knowledge_db_connection() as knowledge_conn:
+            unprocessed_count = knowledge_conn.execute("""
+                SELECT COUNT(*) FROM raw_news_data WHERE processed = 0
+            """).fetchone()[0]
+            
+            if unprocessed_count > 0:
+                print(f"📰 Found {unprocessed_count} unprocessed articles - queuing for processing...")
+                
+                # Get unprocessed news
+                knowledge_conn.row_factory = sqlite3.Row
+                unprocessed_news = knowledge_conn.execute("""
+                    SELECT news_id, headline, story, news_source, creation_timestamp, 
+                           language, date_line, badges, teaser
+                    FROM raw_news_data 
+                    WHERE processed = 0
+                    ORDER BY creation_timestamp DESC
+                    LIMIT 10
+                """).fetchall()
+                
+                # Queue each article for processing
+                for news_row in unprocessed_news:
+                    news_data = {
+                        'newsId': news_row['news_id'],
+                        'headline': news_row['headline'],
+                        'story': news_row['story'],
+                        'newsSource': news_row['news_source'], 
+                        'creationTimestamp': news_row['creation_timestamp'],
+                        'language': news_row['language'],
+                        'dateLine': news_row['date_line'],
+                        'badges': news_row['badges'],
+                        'teaser': news_row['teaser'] if news_row['teaser'] else ''
+                    }
+                    
+                    # Queue for processing using our new Evaluator-Optimizer workflow
+                    process_news_article(news_data)
+                
+                print(f"✅ Queued {len(unprocessed_news)} articles for processing")
+            else:
+                print("✅ No unprocessed news found - system is up to date")
+                
+    except Exception as e:
+        print(f"❌ Auto-processing error: {e}")
+        # Don't raise - let the periodic task continue on next cycle
+
+@huey.periodic_task(crontab(minute='0', hour='*/6'))  # Every 6 hours
+def auto_update_risk_calculation():
+    """
+    Periodic task: Update daily risk calculation every 6 hours
+    This ensures the dashboard always has current risk data even without new news
+    """
+    print("📊 Auto-updating daily risk calculation...")
+    try:
+        update_daily_risk_calculation()
+        print("✅ Auto risk calculation completed")
+    except Exception as e:
+        print(f"❌ Auto risk calculation error: {e}")
+        # Don't raise - let the periodic task continue on next cycle
 
 # ==========================================
 # PUBLISHER: Read knowledge store and queue news
@@ -624,7 +752,8 @@ def publish_all_news():
         
         print(f"✅ Successfully queued {queued_count} news articles for processing")
         print(f"🔧 Start worker with: python -m huey.bin.huey_consumer news_risk_analyzer.huey")
-        print(f"📊 Monitor at: http://localhost:8080")
+        print(f"📊 Monitor Huey at: http://localhost:8080 (worker monitoring)")
+        print(f"🌐 Main API at: http://localhost:8000 (dashboard API)")
         
     except sqlite3.Error as e:
         print(f"❌ Database error: {e}")
@@ -825,9 +954,10 @@ def dev_reset_all_tables():
             risk_conn.execute("DELETE FROM risk_calculations")
             risk_conn.execute("DELETE FROM sse_events")
             risk_conn.execute("DELETE FROM dashboard_cache")
+            risk_conn.execute("DELETE FROM risk_storylines")  # Clear cached storylines
             
             # Reset auto-increment counters
-            risk_conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('news_articles', 'risk_calculations', 'sse_events')")
+            risk_conn.execute("DELETE FROM sqlite_sequence WHERE name IN ('news_articles', 'risk_calculations', 'sse_events', 'risk_storylines')")
             
             # Recreate dashboard_trending_topics view with proper dynamic SQL
             print("🔄 Recreating dashboard_trending_topics view...")
@@ -1004,6 +1134,20 @@ def dev_system_status():
     try:
         status = {}
         
+        # LLM Configuration status
+        llm_provider = os.getenv('LLM_PROVIDER', 'openai').lower()
+        llm_model = os.getenv('LLM_MODEL', 'gpt-4o')
+        
+        print(f"🤖 LLM CONFIGURATION:")
+        print(f"   Provider: {llm_provider.upper()}")
+        print(f"   Model: {llm_model}")
+        
+        if llm_provider == 'azure':
+            azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', 'Not configured')
+            deployment_name = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'Not configured')
+            print(f"   Azure Endpoint: {azure_endpoint}")
+            print(f"   Deployment Name: {deployment_name}")
+        
         # Raw news data status
         with get_knowledge_db_connection() as knowledge_conn:
             raw_stats = knowledge_conn.execute("""
@@ -1065,7 +1209,6 @@ def dev_system_status():
         
         # Queue status
         try:
-            import os
             queue_db_path = 'news_processing_queue.db'
             if os.path.exists(queue_db_path):
                 queue_conn = sqlite3.connect(queue_db_path)
@@ -1100,126 +1243,6 @@ def dev_system_status():
         error_msg = f"❌ Failed to get system status: {e}"
         print(error_msg)
         return {'status': 'error', 'error': str(e)}
-
-# ==========================================
-# PERIODIC TASKS
-# ==========================================
-
-@huey.periodic_task(crontab(minute='*/1'))  # Every 1 minute for demo
-def periodic_news_publisher():
-    """Periodic task to automatically queue unprocessed news"""
-    print("🔄 Running periodic news publisher...")
-    
-    try:
-        with get_knowledge_db_connection() as knowledge_conn:
-            knowledge_conn.row_factory = sqlite3.Row
-            
-            # Check for unprocessed news
-            unprocessed_news = knowledge_conn.execute("""
-                SELECT news_id, headline, story, news_source, creation_timestamp, 
-                       language, date_line, badges, teaser
-                FROM raw_news_data 
-                WHERE processed = 0
-                ORDER BY creation_timestamp DESC
-                LIMIT 10
-            """).fetchall()
-            
-            if unprocessed_news:
-                print(f"📰 Found {len(unprocessed_news)} unprocessed news articles")
-                
-                # Queue each news article for processing
-                for news_row in unprocessed_news:
-                    news_data = {
-                        'newsId': news_row['news_id'],
-                        'headline': news_row['headline'],
-                        'story': news_row['story'],
-                        'newsSource': news_row['news_source'], 
-                        'creationTimestamp': news_row['creation_timestamp'],
-                        'language': news_row['language'],
-                        'dateLine': news_row['date_line'],
-                        'badges': news_row['badges'],
-                        'teaser': news_row['teaser'] if news_row['teaser'] else ''
-                    }
-                    
-                    # Queue the processing job
-                    process_news_article(news_data)
-                
-                print(f"✅ Queued {len(unprocessed_news)} news articles for processing")
-            else:
-                print("📰 No unprocessed news found")
-                
-    except Exception as e:
-        print(f"❌ Periodic news publisher failed: {e}")
-
-@huey.periodic_task(crontab(hour='*/6'))  # Every 6 hours
-def periodic_risk_calculation():
-    """Periodic task to update risk calculations"""
-    print("🔄 Running periodic risk calculation...")
-    update_daily_risk_calculation()
-
-@huey.periodic_task(crontab(minute='*/30'))  # Every 30 minutes  
-def update_trending_analysis():
-    """Update trending keywords and topics based on recent news velocity using connection pooling"""
-    print("📈 Updating trending analysis...")
-    
-    try:
-        with get_risk_db_connection() as risk_conn:
-            # Get the latest timestamp from news articles
-            latest_timestamp_result = risk_conn.execute("""
-                SELECT MAX(published_date) as latest_timestamp
-                FROM news_articles 
-                WHERE status != 'Archived'
-            """).fetchone()
-            
-            if not latest_timestamp_result or not latest_timestamp_result[0]:
-                print("No news available for trending analysis")
-                return
-                
-            latest_timestamp = latest_timestamp_result[0]
-            
-            # Update is_trending flag based on keyword velocity (using latest timestamp as reference)
-            trending_keywords = risk_conn.execute("""
-                SELECT keyword, recent_count, total_count
-                FROM (
-                    SELECT 
-                        LOWER(value) as keyword,
-                        COUNT(CASE WHEN published_date >= datetime(?, '-6 hours') THEN 1 END) as recent_count,
-                        COUNT(*) as total_count
-                    FROM news_articles, json_each(keywords)
-                    WHERE published_date >= datetime(?, '-24 hours')
-                      AND status != 'Archived'
-                      AND keywords IS NOT NULL
-                    GROUP BY LOWER(value)
-                    HAVING total_count >= 3
-                )
-                WHERE recent_count > 0 AND (recent_count * 1.0 / total_count) > 0.4
-            """, [latest_timestamp, latest_timestamp]).fetchall()
-            
-            # Mark news as trending if they contain trending keywords
-            if trending_keywords:
-                trending_keyword_list = [kw[0] for kw in trending_keywords]
-                
-                for keyword in trending_keyword_list:
-                    risk_conn.execute("""
-                        UPDATE news_articles 
-                        SET is_trending = 1 
-                        WHERE published_date >= datetime(?, '-6 hours')
-                          AND status != 'Archived'
-                          AND (
-                            keywords LIKE ? 
-                            OR headline LIKE ?
-                            OR EXISTS (
-                                SELECT 1 FROM json_each(keywords) 
-                                WHERE LOWER(value) = LOWER(?)
-                            )
-                          )
-                    """, [latest_timestamp, f'%{keyword}%', f'%{keyword}%', keyword])
-                
-                risk_conn.commit()
-                print(f"✅ Updated trending analysis for {len(trending_keyword_list)} keywords")
-        
-    except Exception as e:
-        print(f"❌ Failed to update trending analysis: {e}")
 
 # ==========================================
 # MAIN EXECUTION

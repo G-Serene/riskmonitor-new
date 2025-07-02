@@ -168,12 +168,20 @@ AVERAGE RISK SCORE: {context['avg_risk_score']:.1f}/10
     article_summaries = []
     
     for i, article in enumerate(key_articles, 1):
+        # Include more details and actual content for better referencing
+        content_preview = ""
+        if article.get('content'):
+            content_preview = f"\n   Content Preview: {article.get('content', '')[:300]}..."
+        elif article.get('summary'):
+            content_preview = f"\n   Summary: {article.get('summary', '')[:300]}..."
+        
         article_summaries.append(f"""
-{i}. {article.get('headline', 'No headline')}
+ARTICLE {i}: {article.get('headline', 'No headline')}
    Date: {article.get('published_date', 'Unknown')}
+   Source: {article.get('source_name', 'Unknown')}
    Severity: {article.get('severity_level', 'Low')} | Risk Score: {article.get('overall_risk_score', 0):.1f}
-   Summary: {article.get('summary', 'No summary')[:200]}...
    Countries: {', '.join(article.get('countries', [])[:3])}
+   Markets: {', '.join(article.get('affected_markets', [])[:3])}{content_preview}
 """)
     
     # Cross-linkage analysis
@@ -201,22 +209,33 @@ You are a senior financial risk analyst at a major international bank, tasked wi
 {chr(10).join(cross_linkages)}
 
 === TASK ===
-Create a professional, executive-level risk storyline that connects these events into a coherent narrative. Focus on:
+Create a professional, executive-level risk storyline that connects these events into a coherent narrative. 
+
+**CRITICAL REQUIREMENT: You MUST directly quote and reference specific articles listed above. Use phrases like:**
+- "According to [Source Name], '[direct quote from content/summary]'"  
+- "As reported in [Headline], [paraphrase key point]"
+- "A [Date] report highlighted that '[quote]'"
+- "The [Source] article on [Date] noted '[specific detail]'"
+
+Focus on:
 
 1. **EXECUTIVE SUMMARY** (3-4 sentences)
    - What is the core risk story?
    - Why should senior management care?
    - What's the bottom line for our bank?
+   - Include at least 1 direct quote from a key article
 
 2. **RISK DEVELOPMENT TIMELINE** 
    - How did this theme emerge and evolve?
    - What were the key trigger events?
    - What accelerated the risks?
+   - Reference specific articles by date and source
 
 3. **CROSS-LINKAGE ANALYSIS**
    - How are different events/regions interconnected?
    - What are the contagion pathways?
    - Where do we see domino effects?
+   - Quote specific examples from the articles
 
 4. **BANKING SECTOR IMPACT ASSESSMENT**
    - Direct impacts on international banks
@@ -224,26 +243,31 @@ Create a professional, executive-level risk storyline that connects these events
    - Credit risk considerations
    - Market risk exposures
    - Regulatory compliance issues
+   - Support with specific quotes from articles showing actual impacts
 
 5. **FORWARD-LOOKING RISK ASSESSMENT**
    - What trends are likely to continue?
    - What new risks might emerge?
    - What are the tail risks?
    - Time horizon for impacts
+   - Base predictions on specific quotes and data from articles
 
 6. **STRATEGIC RECOMMENDATIONS**
    - Immediate actions required
    - Medium-term risk mitigation
    - Monitoring priorities
    - Stress testing scenarios
+   - Reference specific risks mentioned in the articles
 
 === OUTPUT REQUIREMENTS ===
 - Executive-level language (senior management audience)
-- Quantify impacts where possible
+- **MANDATORY: Include at least 8-10 direct quotes or specific references to the articles above**
+- Quantify impacts where possible using data from articles
 - Include specific bank business line implications
-- Provide actionable insights
-- Maximum 1,500 words
+- Provide actionable insights based on article content
+- Maximum 1,800 words
 - Professional tone with urgency where appropriate
+- Use article headlines and sources as citations
 
 === CRITICAL FOCUS AREAS ===
 - International banking operations

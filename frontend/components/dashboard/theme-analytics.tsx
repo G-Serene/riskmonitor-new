@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { AlertCircle, BarChart3, FileText, Sparkles, Clock, Download, Eye, Globe, TrendingUp, Target } from "lucide-react"
 import { apiClient, ThemeStatistics, ThemeStatisticsResponse, ThemeArticlesResponse, StorylineResponse, RecentStorylinesResponse } from "@/lib/api-client"
 import { formatRelativeTime } from "@/lib/time-utils"
+import { useToast } from "@/hooks/use-toast"
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -27,8 +28,11 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generatingStoryline, setGeneratingStoryline] = useState(false)
+  const [generatingThemeId, setGeneratingThemeId] = useState<string | null>(null)
+  const [generationProgress, setGenerationProgress] = useState(0)
   const [showStorylineDialog, setShowStorylineDialog] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
+  const { toast } = useToast()
 
   // Fetch theme statistics and existing storylines on component mount
   useEffect(() => {
@@ -74,11 +78,61 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
     }
   }
 
-  const handleGenerateStoryline = async (themeId: string) => {
-    // First check if we already have a storyline for this theme
+  const handleGenerateStoryline = async (themeId: string, forceRegenerate: boolean = true) => {
+    // If not forcing regeneration, check if we already have a storyline for this theme
     const existingStoryline = existingStorylines?.storylines.find(s => s.theme_id === themeId)
     
-    if (existingStoryline) {
+    if (!forceRegenerate && existingStoryline) {
+      // Get fresh theme data to calculate risk scores for existing storyline
+      let contextData = {
+        total_exposure: 0,
+        date_range: { start: "", end: "" },
+        geographic_scope: {
+          countries: existingStoryline.affected_countries || [],
+          country_count: (existingStoryline.affected_countries || []).length,
+          cross_country_events: {}
+        },
+        market_scope: {
+          markets: existingStoryline.affected_markets || [],
+          market_count: (existingStoryline.affected_markets || []).length,
+          cross_market_events: {}
+        },
+        severity_distribution: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+        avg_risk_score: 0,
+        max_risk_score: 0
+      }
+
+      // Try to get current theme articles to calculate actual risk scores
+      let currentThemeArticles: any[] = []
+      try {
+        const themeArticlesData = await apiClient.getThemeArticles(themeId)
+        currentThemeArticles = themeArticlesData.articles
+        if (themeArticlesData.articles.length > 0) {
+          // Calculate risk scores from current articles
+          const riskScores = themeArticlesData.articles.map(a => a.overall_risk_score)
+          contextData.avg_risk_score = riskScores.reduce((sum, score) => sum + score, 0) / riskScores.length
+          contextData.max_risk_score = Math.max(...riskScores)
+          
+          // Calculate severity distribution
+          const severityCount = { Critical: 0, High: 0, Medium: 0, Low: 0 }
+          themeArticlesData.articles.forEach(article => {
+            if (severityCount.hasOwnProperty(article.severity_level)) {
+              severityCount[article.severity_level]++
+            }
+          })
+          contextData.severity_distribution = severityCount
+          
+          // Calculate date range
+          const dates = themeArticlesData.articles.map(a => new Date(a.published_date))
+          contextData.date_range = {
+            start: new Date(Math.min(...dates.map(d => d.getTime()))).toISOString().split('T')[0],
+            end: new Date(Math.max(...dates.map(d => d.getTime()))).toISOString().split('T')[0]
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch current theme articles for risk calculation:", err)
+      }
+
       // Use existing storyline - create a minimal StorylineResponse
       const fullStoryline: StorylineResponse = {
         theme_id: existingStoryline.theme_id,
@@ -87,21 +141,7 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
         context: {
           theme_name: existingStoryline.theme_name,
           article_count: existingStoryline.article_count,
-          total_exposure: 0, // Default values for cached storylines
-          date_range: { start: "", end: "" },
-          geographic_scope: {
-            countries: [],
-            country_count: 0,
-            cross_country_events: {}
-          },
-          market_scope: {
-            markets: [],
-            market_count: 0,
-            cross_market_events: {}
-          },
-          severity_distribution: { Critical: 0, High: 0, Medium: 0, Low: 0 },
-          avg_risk_score: 0,
-          max_risk_score: 0
+          ...contextData
         },
         report_data: {
           report_metadata: {
@@ -129,7 +169,16 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
             cross_linkages: { countries: {}, markets: {} },
             timeline: []
           },
-          article_references: [],
+          article_references: currentThemeArticles.length > 0 ? currentThemeArticles.slice(0, 10).map((article: any) => ({
+            id: article.id,
+            headline: article.headline,
+            source: article.source_name,
+            date: article.published_date,
+            severity: article.severity_level,
+            risk_score: article.overall_risk_score,
+            countries: article.countries || [],
+            financial_exposure: 0 // Default since not available in theme articles
+          })) : [],
           risk_metrics: {
             total_articles_analyzed: existingStoryline.article_count,
             critical_articles: 0,
@@ -156,19 +205,56 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
       return
     }
 
-    // Generate new storyline if none exists
+    // Generate new storyline
     try {
       setGeneratingStoryline(true)
-      const response = await apiClient.generateThemeStoryline(themeId)
+      setGeneratingThemeId(themeId)
+      
+      // Show immediate feedback
+      const themeName = themeStats.find(t => t.theme_id === themeId)?.theme_name || 'Unknown Theme'
+      toast({
+        title: "Generating Impact Assessment",
+        description: `Creating storyline for "${themeName}". This may take 30-60 seconds...`,
+      })
+      
+      // Simulate progress updates (since we don't have real progress from the API)
+      setGenerationProgress(0)
+      const progressInterval = setInterval(() => {
+        setGenerationProgress(prev => {
+          if (prev >= 90) return prev // Stop at 90% until completion
+          return prev + Math.random() * 15 // Random progress increments
+        })
+      }, 2000)
+      
+      const response = await apiClient.generateThemeStoryline(themeId, 50, 30, forceRegenerate)
+      
+      // Complete the progress
+      clearInterval(progressInterval)
+      setGenerationProgress(100)
       setStoryline(response)
       setShowStorylineDialog(true)
+      
+      // Show success notification
+      toast({
+        title: "Impact Assessment Complete",
+        description: `Storyline for "${themeName}" has been generated successfully.`,
+      })
+      
       // Refresh existing storylines
       await fetchExistingStorylines()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate impact assessment")
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate impact assessment"
+      setError(errorMessage)
+      toast({
+        variant: "destructive",
+        title: "Generation Failed",
+        description: errorMessage,
+      })
       console.error("Impact assessment generation error:", err)
     } finally {
       setGeneratingStoryline(false)
+      setGeneratingThemeId(null)
+      setGenerationProgress(0)
     }
   }
 
@@ -177,9 +263,28 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
     
     try {
       setDownloadingReport(true)
-      await apiClient.downloadStorylineReport(storyline.theme_id)
+      
+      // Show starting toast
+      toast({
+        title: "Generating PDF Report",
+        description: "Converting impact assessment to PDF format...",
+      })
+      
+      const result = await apiClient.downloadStorylineReport(storyline.theme_id)
+      
+      // Show success toast
+      toast({
+        title: "PDF Download Complete",
+        description: `Report saved as ${result.filename}`,
+      })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to download report")
+      const errorMessage = err instanceof Error ? err.message : "Failed to download report"
+      setError(errorMessage)
+      toast({
+        variant: "destructive",
+        title: "PDF Generation Failed",
+        description: errorMessage,
+      })
       console.error("Download error:", err)
     } finally {
       setDownloadingReport(false)
@@ -241,54 +346,117 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
   }
 
   return (
-    <div className={`space-y-4 ${className}`}>
+    <div className={`flex flex-col space-y-4 h-full ${className}`}>
       {/* Theme Statistics Bar Chart */}
-      <Card>
-        <CardHeader>
+      <Card className="flex-1 flex flex-col min-h-0">
+        <CardHeader className="flex-shrink-0">
           <CardTitle className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5" />
             Risk Themes Distribution
           </CardTitle>
           <CardDescription>
-            Click on a theme to view articles and generate impact assessments
+            Last 10 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
+        <CardContent className="flex-1 overflow-hidden p-6">
+          <div className="news-feed-scroll">
+            <div className="space-y-3">
             {themeStats.length > 0 ? (
-              themeStats.map((theme, index) => (
-                <div key={theme.theme_id} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-muted-foreground">
-                      {theme.theme_name}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Badge className={getRiskScoreColor(theme.avg_risk_score)}>
-                        Avg Risk: {theme.avg_risk_score.toFixed(1)}
-                      </Badge>
-                      <span className="text-sm text-muted-foreground">
-                        {theme.article_count} articles
+              themeStats.map((theme, index) => {
+                const existingStoryline = existingStorylines?.storylines.find(s => s.theme_id === theme.theme_id)
+                const isGenerating = generatingStoryline && generatingThemeId === theme.theme_id
+                
+                return (
+                  <div key={theme.theme_id} className="space-y-2 p-3 border rounded-lg hover:bg-gray-50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-muted-foreground">
+                        {theme.theme_name}
                       </span>
+                      <div className="flex items-center gap-2">
+                        <Badge className={getRiskScoreColor(theme.avg_risk_score)}>
+                          Avg Risk: {theme.avg_risk_score.toFixed(1)}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground">
+                          {theme.article_count} articles
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {/* Theme bar */}
+                    <div className="relative">
+                      <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${getThemeColor(index)} transition-all`}
+                          style={{
+                            width: `${Math.max(5, (theme.article_count / Math.max(...themeStats.map(t => t.article_count))) * 100)}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Action buttons and storyline info */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleGenerateStoryline(theme.theme_id, true)} // Force regenerate
+                          disabled={generatingStoryline}
+                          className="gap-1 h-7 px-2 text-xs relative overflow-hidden"
+                        >
+                          {isGenerating ? (
+                            <>
+                              <div className="absolute inset-0 bg-blue-600 transition-all duration-300" 
+                                   style={{ width: `${generationProgress}%` }} />
+                              <div className="relative z-10 flex items-center gap-1">
+                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                                <span className="text-[10px]">
+                                  {generationProgress < 100 ? `${Math.round(generationProgress)}%` : 'Completing...'}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-3 w-3" />
+                              Generate
+                            </>
+                          )}
+                        </Button>
+                        
+                        {existingStoryline && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              // Use existing storyline without regeneration
+                              setSelectedTheme(theme.theme_id)
+                              handleGenerateStoryline(theme.theme_id, false) // Don't force regenerate
+                            }}
+                            className="gap-1 h-7 px-2 text-xs"
+                          >
+                            <Eye className="h-3 w-3" />
+                            View
+                          </Button>
+                        )}
+                      </div>
+                      
+                      {/* Storyline timestamp info */}
+                      {existingStoryline && (
+                        <div className="text-xs text-muted-foreground">
+                          Generated {formatRelativeTime(
+                            Math.floor((new Date().getTime() - new Date(existingStoryline.generated_at).getTime()) / (1000 * 60))
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="relative">
-                    <div className="h-6 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full ${getThemeColor(index)} cursor-pointer transition-all hover:opacity-80`}
-                        style={{
-                          width: `${Math.max(5, (theme.article_count / Math.max(...themeStats.map(t => t.article_count))) * 100)}%`
-                        }}
-                        onClick={() => handleGenerateStoryline(theme.theme_id)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))
+                )
+              })
             ) : (
               <div className="text-center text-muted-foreground py-8">
                 <p>No theme data available</p>
               </div>
             )}
+          </div>
           </div>
         </CardContent>
       </Card>
@@ -304,7 +472,7 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
                   {themeArticles.theme_name} Articles
                 </CardTitle>
                 <CardDescription>
-                  {themeArticles.total_count} articles in this theme
+                  {themeArticles.total_count} articles in this theme (last 14 days)
                 </CardDescription>
               </div>
               <div className="flex gap-2">
@@ -396,7 +564,7 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
                 <div className="text-center">
                   <div className="flex items-center justify-center gap-1 text-sm text-muted-foreground mb-1">
                     <TrendingUp className="h-3 w-3" />
-                    Markets
+                    Financial Markets
                   </div>
                   <div className="font-semibold">{storyline.context.market_scope.market_count}</div>
                 </div>
@@ -417,11 +585,16 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
                   className="flex items-center gap-2"
                 >
                   {downloadingReport ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Converting to PDF...
+                    </>
                   ) : (
-                    <Download className="h-4 w-4" />
+                    <>
+                      <Download className="h-4 w-4" />
+                      Download PDF Report
+                    </>
                   )}
-                  Download PDF Report
                 </Button>
               </div>
 
@@ -430,7 +603,8 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
               {/* Impact Assessment Content */}
               <div className="flex-1 overflow-hidden">
                 <ScrollArea className="h-[calc(95vh-320px)] w-full rounded-md border">
-                  <div className="p-6">
+                  <div className="p-6 space-y-6">
+                    {/* Main Storyline */}
                     <div className="prose prose-sm max-w-none prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-ul:text-foreground prose-ol:text-foreground">
                       <ReactMarkdown 
                         remarkPlugins={[remarkGfm]}
@@ -449,50 +623,101 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
                         {storyline.storyline}
                       </ReactMarkdown>
                     </div>
+
+                    <Separator />
+
+                    {/* Reference Articles Section */}
+                    {storyline.report_data.article_references && storyline.report_data.article_references.length > 0 && (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-semibold text-foreground">Reference Articles</h3>
+                        <div className="grid gap-3">
+                          {storyline.report_data.article_references.map((article, index) => (
+                            <div key={article.id || index} className="p-4 border rounded-lg bg-muted/10">
+                              <h4 className="font-medium text-sm mb-2 text-foreground">{article.headline}</h4>
+                              <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                                <span>{article.source}</span>
+                                <span>{new Date(article.date).toLocaleDateString()}</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {article.severity}
+                                </Badge>
+                                <Badge className={getRiskScoreColor(article.risk_score)}>
+                                  Risk: {article.risk_score.toFixed(1)}
+                                </Badge>
+                              </div>
+                              {article.countries && article.countries.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {article.countries.slice(0, 5).map((country) => (
+                                    <Badge key={country} variant="secondary" className="text-xs">
+                                      {country}
+                                    </Badge>
+                                  ))}
+                                  {article.countries.length > 5 && (
+                                    <span className="text-xs text-muted-foreground">
+                                      +{article.countries.length - 5} more
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <Separator />
+
+                    {/* Supporting Data - Now inside the scroll area */}
+                    <div className="space-y-6">
+                      <h3 className="text-lg font-semibold text-foreground">Supporting Data</h3>
+                      
+                      {/* Geographic Scope */}
+                      {storyline.context.geographic_scope.countries.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="font-semibold text-sm text-foreground">
+                            Geographic Scope ({storyline.context.geographic_scope.country_count} countries)
+                          </h4>
+                          <div className="flex flex-wrap gap-2">
+                            {storyline.context.geographic_scope.countries.map((country) => (
+                              <Badge key={country} variant="outline">
+                                {country}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Market Scope */}
+                      {storyline.context.market_scope.markets.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="font-semibold text-sm text-foreground">
+                            Financial Markets ({storyline.context.market_scope.market_count} markets)
+                          </h4>
+                          <div className="flex flex-wrap gap-2">
+                            {storyline.context.market_scope.markets.map((market) => (
+                              <Badge key={market} variant="outline">
+                                {market}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Severity Distribution */}
+                      <div className="space-y-2">
+                        <h4 className="font-semibold text-sm text-foreground">Severity Distribution</h4>
+                        <div className="grid grid-cols-4 gap-2">
+                          {Object.entries(storyline.context.severity_distribution).map(([severity, count]) => (
+                            <div key={severity} className="text-center p-3 border rounded">
+                              <div className="font-semibold text-sm">{count}</div>
+                              <div className="text-xs text-muted-foreground">{severity}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </ScrollArea>
               </div>
-
-              {/* Supporting Data */}
-              {(storyline.context.geographic_scope.countries.length > 0 || storyline.context.market_scope.markets.length > 0) && (
-                <div className="space-y-4 border-t pt-4">
-                  {storyline.context.geographic_scope.countries.length > 0 && (
-                    <>
-                      <h4 className="font-semibold text-sm">Geographic Scope</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {storyline.context.geographic_scope.countries.map((country) => (
-                          <Badge key={country} variant="outline">
-                            {country}
-                          </Badge>
-                        ))}
-                      </div>
-                    </>
-                  )}
-
-                  {storyline.context.market_scope.markets.length > 0 && (
-                    <>
-                      <h4 className="font-semibold text-sm">Market Scope</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {storyline.context.market_scope.markets.map((market) => (
-                          <Badge key={market} variant="outline">
-                            {market}
-                          </Badge>
-                        ))}
-                      </div>
-                    </>
-                  )}
-
-                  <h4 className="font-semibold text-sm">Severity Distribution</h4>
-                  <div className="grid grid-cols-4 gap-2">
-                    {Object.entries(storyline.context.severity_distribution).map(([severity, count]) => (
-                      <div key={severity} className="text-center p-2 border rounded">
-                        <div className="font-semibold text-sm">{count}</div>
-                        <div className="text-xs text-muted-foreground">{severity}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </DialogContent>

@@ -163,10 +163,10 @@ export default function RiskDashboardContent() {
       dashboard_summary: (sseData.dashboardSummary && Object.keys(sseData.dashboardSummary).length > 0) 
         ? sseData.dashboardSummary 
         : initialData.dashboard_summary,
-      sentiment_analysis: sseData.sentimentAnalysis || initialData.sentiment_analysis,
-      trending_topics: sseData.trendingTopics.length > 0 ? sseData.trendingTopics : initialData.trending_topics,
+      sentiment_analysis: initialData.sentiment_analysis,
+      trending_topics: initialData.trending_topics,
       risk_breakdown: sseData.riskBreakdown.length > 0 ? sseData.riskBreakdown : initialData.risk_breakdown,
-      geographic_risk: sseData.geographicRisk.length > 0 ? sseData.geographicRisk : initialData.geographic_risk,
+      geographic_risk: initialData.geographic_risk,
       news_feed: mergedNews,
       time_window: initialData.time_window,
       time_window_description: initialData.time_window_description,

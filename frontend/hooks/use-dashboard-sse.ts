@@ -4,19 +4,13 @@ import { useEffect, useState, useCallback, useRef } from "react"
 import type {
   NewsArticle,
   DashboardSummary,
-  SentimentAnalysis,
-  TrendingTopic,
   RiskBreakdown,
-  GeographicRisk,
 } from "@/lib/api-client"
 
 interface SSEDashboardData {
   dashboardSummary: DashboardSummary | null
-  sentimentAnalysis: SentimentAnalysis | null
   newsArticles: NewsArticle[]
-  trendingTopics: TrendingTopic[]
   riskBreakdown: RiskBreakdown[]
-  geographicRisk: GeographicRisk[]
   criticalAlerts: number
   overallRiskScore: number
   riskTrend: string
@@ -31,11 +25,8 @@ interface SSEStatus {
 export function useDashboardSSE() {
   const [data, setData] = useState<SSEDashboardData>({
     dashboardSummary: null,
-    sentimentAnalysis: null,
     newsArticles: [],
-    trendingTopics: [],
     riskBreakdown: [],
-    geographicRisk: [],
     criticalAlerts: 0,
     overallRiskScore: 0,
     riskTrend: "Stable",
@@ -63,9 +54,43 @@ export function useDashboardSSE() {
     }
   }
 
+  // Helper function to extract event data from flexible envelope pattern
+  const extractEventData = (eventData: any) => {
+    // Check if this is the new flexible envelope pattern
+    if (eventData && typeof eventData === 'object' && 'event_data' in eventData) {
+      // New flexible pattern: { event_id, event_type, envelope_type, event_data, priority, timestamp }
+      return {
+        originalEventType: eventData.event_type,
+        envelopeType: eventData.envelope_type,
+        actualData: eventData.event_data,
+        eventId: eventData.event_id,
+        priority: eventData.priority,
+        timestamp: eventData.timestamp
+      }
+    } else {
+      // Legacy pattern: direct event data
+      return {
+        originalEventType: null,
+        envelopeType: null,
+        actualData: eventData,
+        eventId: null,
+        priority: null,
+        timestamp: eventData?.timestamp
+      }
+    }
+  }
+
   // Helper function to handle events by type
   const handleEventByType = (eventType: string, eventData: any) => {
-    const currentTime = new Date().toISOString()
+    // Extract data using flexible envelope pattern
+    const extracted = extractEventData(eventData)
+    const actualData = extracted.actualData
+    const currentTime = extracted.timestamp || new Date().toISOString()
+    
+    // Log flexible event system info
+    if (extracted.originalEventType) {
+      console.log(`🎯 [SSE] Flexible Event - Original: ${extracted.originalEventType}, Envelope: ${extracted.envelopeType}, Priority: ${extracted.priority}`)
+    }
     
     switch (eventType) {
       case 'news_update':
@@ -76,10 +101,10 @@ export function useDashboardSSE() {
         
       case 'news_feed_update':
         console.log("📰 [SSE] Handling news_feed_update event")
-        if (eventData.articles) {
+        if (actualData.articles) {
           setData((prev) => ({
             ...prev,
-            newsArticles: eventData.articles,
+            newsArticles: actualData.articles,
           }))
           console.log("✅ [SSE] News articles updated in state")
         }
@@ -89,39 +114,32 @@ export function useDashboardSSE() {
       case 'dashboard_summary_update':
         console.log("📊 [SSE] Handling dashboard_summary_update event")
         // Validate dashboard summary data before updating
-        if (eventData && 
-            typeof eventData === 'object' && 
-            'critical_count' in eventData && 
-            'high_count' in eventData &&
-            'medium_count' in eventData &&
-            'low_count' in eventData) {
+        if (actualData && 
+            typeof actualData === 'object' && 
+            'critical_count' in actualData && 
+            'high_count' in actualData &&
+            'medium_count' in actualData &&
+            'low_count' in actualData) {
           
-          console.log("✅ [SSE] Valid dashboard summary data received:", eventData)
+          console.log("✅ [SSE] Valid dashboard summary data received:", actualData)
           setData((prev) => ({
             ...prev,
-            dashboardSummary: eventData,
+            dashboardSummary: actualData,
           }))
         } else {
-          console.warn("⚠️ [SSE] Incomplete dashboard summary data received:", eventData)
+          console.warn("⚠️ [SSE] Incomplete dashboard summary data received:", actualData)
         }
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
         break
         
-      case 'sentiment_update':
-        console.log("😊 [SSE] Handling sentiment_update event")
-        setData((prev) => ({
-          ...prev,
-          sentimentAnalysis: eventData,
-        }))
-        setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
-        break
+
         
       case 'risk_breakdown_update':
         console.log("📈 [SSE] Handling risk_breakdown_update event")
-        if (eventData.breakdown) {
+        if (actualData.breakdown) {
           setData((prev) => ({
             ...prev,
-            riskBreakdown: eventData.breakdown,
+            riskBreakdown: actualData.breakdown,
           }))
         }
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
@@ -131,46 +149,26 @@ export function useDashboardSSE() {
         console.log("⚠️ [SSE] Handling risk_score_update event")
         setData((prev) => ({
           ...prev,
-          overallRiskScore: eventData.overall_risk_score || prev.overallRiskScore,
-          riskTrend: eventData.risk_trend || prev.riskTrend,
+          overallRiskScore: actualData.overall_risk_score || prev.overallRiskScore,
+          riskTrend: actualData.risk_trend || prev.riskTrend,
         }))
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
         break
         
-      case 'trending_topics_update':
-        console.log("🔥 [SSE] Handling trending_topics_update event")
-        if (eventData.topics) {
-          setData((prev) => ({
-            ...prev,
-            trendingTopics: eventData.topics,
-          }))
-        }
-        setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
-        break
-        
-      case 'heatmap_update':
-        console.log("🗺️ [SSE] Handling heatmap_update event")
-        if (eventData.geographic_data) {
-          setData((prev) => ({
-            ...prev,
-            geographicRisk: eventData.geographic_data,
-          }))
-        }
-        setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
-        break
+
         
       case 'alerts_update':
         console.log("🚨 [SSE] Handling alerts_update event")
         setData((prev) => ({
           ...prev,
-          criticalAlerts: eventData.critical_count || prev.criticalAlerts,
+          criticalAlerts: actualData.critical_count || prev.criticalAlerts,
         }))
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
         break
         
       case 'alert_new':
         console.log("🚨 [SSE] Handling alert_new event")
-        if (eventData.event_data) {
+        if (actualData.event_data || actualData.error) {
           setData((prev) => ({
             ...prev,
             criticalAlerts: prev.criticalAlerts + 1,
@@ -190,10 +188,10 @@ export function useDashboardSSE() {
         break
         
       case 'error':
-        console.error("❌ [SSE] Handling error event:", eventData)
+        console.error("❌ [SSE] Handling error event:", actualData)
         setStatus((prev) => ({
           ...prev,
-          error: eventData.error || "SSE error occurred",
+          error: actualData.error || "SSE error occurred",
         }))
         break
         

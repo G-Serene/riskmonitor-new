@@ -17,9 +17,7 @@ Endpoints:
 - GET /api/risk/dashboard - Get comprehensive dashboard data (optimized views)
 - GET /api/risk/calculations - Get risk calculations
 - GET /api/analytics/trends - Get trend analytics
-- GET /api/dashboard/trending-topics - Get trending topics (optimized view)
 - GET /api/dashboard/risk-breakdown - Get risk breakdown by category (optimized view)
-- GET /api/dashboard/geographic-risk - Get geographic risk distribution (optimized view)
 - GET /api/dashboard/summary - Get basic dashboard summary (optimized view)
 - GET /api/stream/news - SSE stream for real-time news updates
 - GET /api/stream/risk - SSE stream for real-time risk updates
@@ -37,6 +35,19 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 from dotenv import load_dotenv
+
+# Import the new flexible SSE event system
+from sse_event_system import (
+    SSEEventManager,
+    emit_news_update,
+    emit_news_feed_update,
+    emit_risk_score_update,
+    emit_dashboard_summary_update,
+    emit_risk_breakdown_update,
+    emit_alerts_update,
+    emit_connection_event,
+    emit_error_event
+)
 
 # Load environment variables
 load_dotenv()
@@ -715,32 +726,7 @@ async def get_trend_analytics(days: int = Query(7, ge=1, le=30)):
 # VIEW-BASED ENDPOINTS (OPTIMIZED QUERIES)
 # ==========================================
 
-@app.get("/api/dashboard/trending-topics")
-async def get_trending_topics():
-    """Get trending topics using optimized view"""
-    try:
-        with get_risk_db_connection() as conn:
-            rows = conn.execute("SELECT * FROM dashboard_trending_topics").fetchall()
-            
-            topics = []
-            for row in rows:
-                topics.append({
-                    "keyword": row["keyword"],
-                    "frequency": row["frequency"],
-                    "avg_impact_score": row["avg_impact_score"],
-                    "latest_mention": row["latest_mention"],
-                    "recent_mentions": row["recent_mentions"],
-                    "avg_risk_level": row["avg_risk_level"],
-                    "trend_velocity": round(row["recent_mentions"] / max(row["frequency"], 1) * 100, 1)
-                })
-            
-            return {
-                "trending_topics": topics,
-                "generated_at": datetime.now().isoformat()
-            }
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error8 (get_trending_topics): {str(e)}")
+
 
 @app.get("/api/dashboard/risk-breakdown")
 async def get_risk_breakdown():
@@ -766,33 +752,7 @@ async def get_risk_breakdown():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error9 (get_risk_breakdown): {str(e)}")
 
-@app.get("/api/dashboard/geographic-risk")
-async def get_geographic_risk(limit: int = Query(20, ge=1, le=50)):
-    """Get geographic risk distribution using optimized view"""
-    try:
-        with get_risk_db_connection() as conn:
-            rows = conn.execute("SELECT * FROM dashboard_geographic_risk LIMIT ?", [limit]).fetchall()
-            
-            geographic_data = []
-            for row in rows:
-                geographic_data.append({
-                    "country": row["primary_country"],
-                    "region": row["region"],
-                    "coordinates": json.loads(row["coordinates"]) if row["coordinates"] else None,
-                    "news_count": row["news_count"],
-                    "risk_weight": row["risk_weight"],
-                    # Total exposure removed as requested
-                    "avg_sentiment": row["avg_sentiment"],
-                    "latest_news_date": row["latest_news_date"]
-                })
-            
-            return {
-                "geographic_risk": geographic_data,
-                "generated_at": datetime.now().isoformat()
-            }
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error10 (get_geographic_risk): {str(e)}")
+
 
 @app.get("/api/dashboard/summary")
 async def get_dashboard_only_summary():
@@ -1176,239 +1136,194 @@ import json
 @app.get("/api/stream/dashboard")
 async def stream_dashboard_updates():
     """
-    Event-driven SSE endpoint for all dashboard widget updates
+    Redesigned Event-driven SSE endpoint using flexible envelope pattern
     
-    Reads from sse_events table to stream real-time updates for every processed news article,
-    regardless of its original timestamp.
+    Uses the new SSEEventManager to handle all backend event types while
+    respecting database constraints. Maps rich backend events to 4 database-allowed
+    envelope types and preserves original event semantics in JSON payload.
     
-    Emits targeted events for:
-    - news_update: Individual news articles (raw event)
-    - news_feed_update: Updated news feed list
-    - risk_update: Risk calculation updates
-    - dashboard_summary_update: General dashboard metrics
-    - sentiment_update: Sentiment analysis updates
-    - risk_breakdown_update: Risk category breakdown changes
-    - alerts_update: Critical alerts (periodic)
-    - trending_topics_update: Trending topics (periodic)
-    - heatmap_update: Geographic risk data (periodic)
+    Supported Events (All Backend Events):
+    - news_update, news_feed_update → news_update envelope
+    - risk_update, risk_score_update, risk_breakdown_update → risk_change envelope  
+    - alerts_update, alert_new, error → alert_new envelope
+    - dashboard_summary_update, connection → dashboard_refresh envelope
     """
     
     async def dashboard_event_generator():
         last_event_id = 0
         
-        # For initial connection, start from 0 to stream all unprocessed events
-        # In production, you might want to start from MAX(event_id) to only get new events
+        # Send initial connection event using new system
+        emit_connection_event(
+            status="connected",
+            message="Dashboard SSE stream connected with flexible event system",
+            last_event_id=last_event_id
+        )
         
-        # Send initial connection event
-        connection_data = json.dumps({
-            "status": "connected",
-            "timestamp": datetime.now().isoformat(),
-            "message": "Dashboard SSE stream connected",
-            "last_event_id": last_event_id
-        })
-        yield f"event: connection\ndata: {connection_data}\n\n"
-        
-        # Track last periodic checks for non-event-driven updates
+        # Track periodic update timers
         last_periodic_checks = {
-            'trending_topics': datetime.now(),
-            'geographic': datetime.now(),
             'alerts': datetime.now()
         }
         
         while True:
             try:
-                with get_risk_db_connection() as conn:
-                    current_time = datetime.now()
+                current_time = datetime.now()
+                
+                # 1. Get events using new flexible event manager
+                new_events = SSEEventManager.get_events_since(last_event_id, limit=50)
+                
+                for event in new_events:
+                    # Extract event details from the flexible system
+                    event_id = event['event_id']
+                    envelope_type = event['envelope_type']  # DB constraint type
+                    original_event_type = event['original_event_type']  # Backend type
+                    event_data = event['event_data']
+                    priority = event['priority']
+                    timestamp = event['timestamp']
                     
-                    # 1. Check for new SSE events (event-driven updates)
-                    new_events = conn.execute("""
-                        SELECT * FROM sse_events 
-                        WHERE event_id > ? 
-                        ORDER BY event_id ASC
-                    """, [last_event_id]).fetchall()
+                    # Always yield the original event type for frontend compatibility
+                    enriched_event_data = {
+                        "event_id": event_id,
+                        "event_type": original_event_type,  # Frontend gets original type
+                        "envelope_type": envelope_type,     # For debugging
+                        "event_data": event_data,
+                        "priority": priority,
+                        "timestamp": timestamp
+                    }
                     
-                    for event in new_events:
-                        event_type = event['event_type']
-                        event_data = json.loads(event['event_data'])
-                        
-                        # Always yield the raw event first
-                        raw_event_data = json.dumps({
-                            "event_id": event['event_id'],
-                            "event_type": event_type,
-                            "event_data": event_data,
-                            "timestamp": event['created_at']
-                        })
-                        yield f"event: {event_type}\ndata: {raw_event_data}\n\n"
-                        
-                        # Handle specific event types with additional updates
-                        if event_type == 'news_update':
-                            # Get updated news feed using the full news_articles table with proper formatting
-                            latest_news = conn.execute("""
-                                SELECT * FROM news_articles 
-                                WHERE status != 'Archived'
-                                ORDER BY display_priority DESC, published_date DESC 
-                                LIMIT 5
-                            """).fetchall()
-                            
-                            news_data = []
-                            for row in latest_news:
-                                # Use the same formatting function as the regular API endpoints
-                                formatted_article = format_news_article(row)
-                                # Add the minutes_ago calculation
-                                minutes_ago = conn.execute("""
-                                    SELECT CAST((julianday('now') - julianday(?)) * 24 * 60 AS INTEGER) as minutes_ago
-                                """, [row["published_date"]]).fetchone()["minutes_ago"]
-                                formatted_article["minutes_ago"] = minutes_ago
-                                news_data.append(formatted_article)
-                            
-                            news_feed_data = json.dumps({
-                                "articles": news_data,
-                                "timestamp": current_time.isoformat(),
-                                "triggered_by_event": event['event_id']
-                            })
-                            yield f"event: news_feed_update\ndata: {news_feed_data}\n\n"
-                            
-                            # Update dashboard summary
-                            dashboard_summary = conn.execute("SELECT * FROM dashboard_summary").fetchone()
-                            if dashboard_summary:
-                                summary_data = json.dumps({
-                                    "total_news_today": dashboard_summary["total_news_today"],
-                                    "critical_count": dashboard_summary["critical_count"],
-                                    "high_count": dashboard_summary["high_count"],
-                                    "avg_sentiment": dashboard_summary["avg_sentiment"],
-                                    "current_risk_score": dashboard_summary["current_risk_score"],
-                                    "timestamp": current_time.isoformat()
-                                })
-                                yield f"event: dashboard_summary_update\ndata: {summary_data}\n\n"
-                            
-                            # Update sentiment analysis
-                            sentiment_data = conn.execute("""
-                                SELECT 
-                                    ROUND(AVG(CASE WHEN sentiment_score > 0.1 THEN 1.0 ELSE 0.0 END) * 100, 1) as positive_pct,
-                                    ROUND(AVG(CASE WHEN sentiment_score BETWEEN -0.1 AND 0.1 THEN 1.0 ELSE 0.0 END) * 100, 1) as neutral_pct,
-                                    ROUND(AVG(CASE WHEN sentiment_score < -0.1 THEN 1.0 ELSE 0.0 END) * 100, 1) as negative_pct
-                                FROM news_articles 
-                                WHERE DATE(published_date) = DATE('now') AND status != 'Archived'
-                            """).fetchone()
-                            
-                            if sentiment_data:
-                                sentiment_update_data = json.dumps({
-                                    "positive_pct": sentiment_data["positive_pct"] or 0,
-                                    "neutral_pct": sentiment_data["neutral_pct"] or 0,
-                                    "negative_pct": sentiment_data["negative_pct"] or 0,
-                                    "timestamp": current_time.isoformat()
-                                })
-                                yield f"event: sentiment_update\ndata: {sentiment_update_data}\n\n"
-                            
-                            # Update risk breakdown
-                            risk_breakdown = conn.execute("SELECT * FROM dashboard_risk_breakdown").fetchall()
-                            breakdown_data = []
-                            for row in risk_breakdown:
-                                breakdown_data.append({
-                                    "category": row["primary_risk_category"],
-                                    "news_count": row["news_count"],
-                                    "percentage": row["percentage"],
-                                    "chart_color": row["chart_color"]
-                                })
-                            
-                            breakdown_update_data = json.dumps({
-                                "breakdown": breakdown_data,
-                                "timestamp": current_time.isoformat()
-                            })
-                            yield f"event: risk_breakdown_update\ndata: {breakdown_update_data}\n\n"
-                        
-                        elif event_type == 'risk_update':
-                            # Get latest risk calculation
-                            latest_risk = conn.execute("""
-                                SELECT * FROM risk_calculations 
-                                ORDER BY calculation_date DESC LIMIT 1
-                            """).fetchone()
-                            
-                            if latest_risk:
-                                risk_score_data = json.dumps({
-                                    "overall_risk_score": latest_risk["overall_risk_score"],
-                                    "risk_trend": latest_risk["risk_trend"],
-                                    "calculation_date": latest_risk["calculation_date"],
-                                    "contributing_factors": json.loads(latest_risk["contributing_factors"]) if latest_risk["contributing_factors"] else [],
-                                    "timestamp": current_time.isoformat()
-                                })
-                                yield f"event: risk_score_update\ndata: {risk_score_data}\n\n"
-                        
-                        # Update last processed event ID
-                        last_event_id = event['event_id']
+                    yield f"event: {original_event_type}\ndata: {json.dumps(enriched_event_data)}\n\n"
                     
-                    # 2. Periodic updates for data that doesn't have events
+                    # Handle cascading updates based on original event type
+                    await handle_cascading_updates(original_event_type, event_data, event_id)
                     
-                    # Check for trending topics changes (every 30 seconds)
-                    if (current_time - last_periodic_checks['trending_topics']).total_seconds() >= 30:
-                        trending_topics = conn.execute("SELECT * FROM dashboard_trending_topics LIMIT 10").fetchall()
-                        topics_data = []
-                        for row in trending_topics:
-                            topics_data.append({
-                                "keyword": row["keyword"],
-                                "frequency": row["frequency"],
-                                "avg_impact_score": row["avg_impact_score"],
-                                "latest_mention": row["latest_mention"],
-                                "recent_mentions": row["recent_mentions"],
-                                "avg_risk_level": row["avg_risk_level"]
-                            })
-                        
-                        trending_topics_data = json.dumps({
-                            "topics": topics_data,
-                            "timestamp": current_time.isoformat()
-                        })
-                        yield f"event: trending_topics_update\ndata: {trending_topics_data}\n\n"
-                        
-                        last_periodic_checks['trending_topics'] = current_time
-                    
-                    # Check for geographic risk updates (every 60 seconds)
-                    if (current_time - last_periodic_checks['geographic']).total_seconds() >= 60:
-                        geographic_risk = conn.execute("SELECT * FROM dashboard_geographic_risk LIMIT 15").fetchall()
-                        geo_data = []
-                        for row in geographic_risk:
-                            geo_data.append({
-                                "country": row["primary_country"],
-                                "region": row["region"],
-                                "coordinates": json.loads(row["coordinates"]) if row["coordinates"] else None,
-                                "news_count": row["news_count"],
-                                "risk_weight": row["risk_weight"],
-                                "avg_sentiment": row["avg_sentiment"],
-                                "latest_news_date": row["latest_news_date"]
-                            })
-                        
-                        heatmap_data = json.dumps({
-                            "geographic_data": geo_data,
-                            "timestamp": current_time.isoformat()
-                        })
-                        yield f"event: heatmap_update\ndata: {heatmap_data}\n\n"
-                        
-                        last_periodic_checks['geographic'] = current_time
-                    
-                    # Check for critical alerts (every check cycle)
-                    critical_alerts = conn.execute("""
-                        SELECT COUNT(*) as count FROM news_articles 
-                        WHERE severity_level = 'Critical' 
-                        AND DATE(published_date) = DATE('now')
-                        AND status != 'Archived'
-                    """).fetchone()
-                    
-                    # Send alerts update periodically
-                    alerts_data = json.dumps({
-                        "critical_count": critical_alerts["count"],
-                        "last_check": current_time.isoformat(),
-                        "timestamp": current_time.isoformat()
-                    })
-                    yield f"event: alerts_update\ndata: {alerts_data}\n\n"
+                    # Update last processed event ID
+                    last_event_id = event_id
+                
+                # Mark processed events (cleanup)
+                if new_events:
+                    processed_ids = [event['event_id'] for event in new_events]
+                    SSEEventManager.mark_events_processed(processed_ids)
+                
+                # 2. Periodic updates for non-event-driven data
+                await handle_periodic_updates(current_time, last_periodic_checks)
                 
             except Exception as e:
+                # Use new error event system
+                emit_error_event(
+                    error=str(e),
+                    context="dashboard_stream_generator"
+                )
+                
+                # Also yield directly for immediate frontend feedback
                 error_data = json.dumps({
                     "error": str(e),
+                    "context": "dashboard_stream_generator", 
                     "timestamp": datetime.now().isoformat()
                 })
                 yield f"event: error\ndata: {error_data}\n\n"
             
-            # Wait 5 seconds before next check
-            await asyncio.sleep(5)
+            # Wait 3 seconds before next check (faster than before)
+            await asyncio.sleep(3)
+    
+    async def handle_cascading_updates(original_event_type: str, event_data: Dict, trigger_event_id: int):
+        """Handle cascading updates based on original event type"""
+        try:
+            with get_risk_db_connection() as conn:
+                current_time = datetime.now()
+                
+                if original_event_type == 'news_update':
+                    # Cascade 1: Update news feed
+                    latest_news = conn.execute("""
+                        SELECT * FROM news_articles 
+                        WHERE status != 'Archived'
+                        ORDER BY display_priority DESC, published_date DESC 
+                        LIMIT 5
+                    """).fetchall()
+                    
+                    news_data = []
+                    for row in latest_news:
+                        formatted_article = format_news_article(row)
+                        minutes_ago = conn.execute("""
+                            SELECT CAST((julianday('now') - julianday(?)) * 24 * 60 AS INTEGER) as minutes_ago
+                        """, [row["published_date"]]).fetchone()["minutes_ago"]
+                        formatted_article["minutes_ago"] = minutes_ago
+                        news_data.append(formatted_article)
+                    
+                    # Emit news feed update
+                    emit_news_feed_update(
+                        articles=news_data,
+                        triggered_by_event=trigger_event_id
+                    )
+                    
+                    # Cascade 2: Update dashboard summary
+                    dashboard_summary = conn.execute("SELECT * FROM dashboard_summary").fetchone()
+                    if dashboard_summary:
+                        emit_dashboard_summary_update(
+                            total_news_today=dashboard_summary["total_news_today"],
+                            critical_count=dashboard_summary["critical_count"],
+                            high_count=dashboard_summary["high_count"],
+                            medium_count=dashboard_summary["medium_count"],
+                            low_count=dashboard_summary["low_count"],
+                            avg_sentiment=dashboard_summary["avg_sentiment"],
+                            current_risk_score=dashboard_summary["current_risk_score"]
+                        )
+                    
+                    # Cascade 3: Update risk breakdown
+                    risk_breakdown = conn.execute("SELECT * FROM dashboard_risk_breakdown").fetchall()
+                    breakdown_data = []
+                    for row in risk_breakdown:
+                        breakdown_data.append({
+                            "category": row["primary_risk_category"],
+                            "news_count": row["news_count"],
+                            "percentage": row["percentage"],
+                            "chart_color": row["chart_color"]
+                        })
+                    
+                    emit_risk_breakdown_update(breakdown=breakdown_data)
+                
+                elif original_event_type in ['risk_update', 'risk_score_update']:
+                    # Get latest risk calculation
+                    latest_risk = conn.execute("""
+                        SELECT * FROM risk_calculations 
+                        ORDER BY calculation_date DESC LIMIT 1
+                    """).fetchone()
+                    
+                    if latest_risk:
+                        emit_risk_score_update(
+                            overall_risk_score=latest_risk["overall_risk_score"],
+                            risk_trend=latest_risk["risk_trend"],
+                            calculation_date=latest_risk["calculation_date"],
+                            contributing_factors=json.loads(latest_risk["contributing_factors"]) if latest_risk["contributing_factors"] else []
+                        )
+                        
+        except Exception as e:
+            emit_error_event(
+                error=f"Cascading update failed: {str(e)}",
+                context=f"original_event_type: {original_event_type}"
+            )
+    
+    async def handle_periodic_updates(current_time: datetime, last_checks: Dict):
+        """Handle periodic updates for non-event-driven data"""
+        try:
+            with get_risk_db_connection() as conn:
+                
+                # Critical alerts (every cycle)
+                critical_alerts = conn.execute("""
+                    SELECT COUNT(*) as count FROM news_articles 
+                    WHERE severity_level = 'Critical' 
+                    AND DATE(published_date) = DATE('now')
+                    AND status != 'Archived'
+                """).fetchone()
+                
+                emit_alerts_update(
+                    critical_count=critical_alerts["count"],
+                    last_check=current_time.isoformat()
+                )
+                
+        except Exception as e:
+            emit_error_event(
+                error=f"Periodic update failed: {str(e)}",
+                context="periodic_updates"
+            )
     
     return EventSourceResponse(dashboard_event_generator())
 

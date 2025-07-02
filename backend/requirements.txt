@@ -1,6 +1,7 @@
 # =============================================================================
 # RISK MONITORING DASHBOARD - BACKEND REQUIREMENTS
 # =============================================================================
+# Python Version: 3.13.3 (see runtime.txt)
 
 # Web Framework & API
 fastapi==0.104.1

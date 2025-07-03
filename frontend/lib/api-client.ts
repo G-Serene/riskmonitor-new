@@ -1,7 +1,7 @@
 // API client for backend integration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
-export type TimeWindow = "1h" | "6h" | "24h" | "today" | "7d" | "custom"
+export type TimeWindow = "1h" | "4h" | "8h" | "12h" | "today" | "yesterday" | "3d" | "7d" | "14d" | "1m" | "3m" | "6m" | "custom"
 
 export interface TimeWindowOption {
   value: TimeWindow
@@ -11,12 +11,36 @@ export interface TimeWindowOption {
 
 export const TIME_WINDOW_OPTIONS: TimeWindowOption[] = [
   { value: "1h", label: "Last Hour", description: "Past 60 minutes" },
-  { value: "6h", label: "Last 6 Hours", description: "Past 6 hours" },
-  { value: "24h", label: "Last 24 Hours", description: "Past 24 hours" },
-  { value: "today", label: "Today", description: "Current day (midnight to now)" },
-  { value: "7d", label: "Past Week", description: "Past 7 days" },
+  { value: "4h", label: "Last 4 Hours", description: "Past 4 hours" },
+  { value: "8h", label: "Last 8 Hours", description: "Past 8 hours" },
+  { value: "12h", label: "Last 12 Hours", description: "Past 12 hours" },
+  { value: "today", label: "Today", description: "Midnight to current time" },
+  { value: "yesterday", label: "Yesterday", description: "Previous day (midnight to midnight)" },
+  { value: "3d", label: "Last 3 Days", description: "Past 3 days" },
+  { value: "7d", label: "Last 7 Days", description: "Past 7 days" },
+  { value: "14d", label: "Last 14 Days", description: "Past 14 days" },
+  { value: "1m", label: "Last Month", description: "Past 30 days" },
+  { value: "3m", label: "Last 3 Months", description: "Past 90 days" },
+  { value: "6m", label: "Last 6 Months", description: "Past 180 days (dashboard limit)" },
   { value: "custom", label: "Custom Range", description: "Select specific date range" },
 ]
+
+// Helper function to check if a time window is considered "live" vs "historical"
+export const isLiveTimeWindow = (timeWindow: TimeWindow): boolean => {
+  return ["1h", "4h", "8h", "12h", "today"].includes(timeWindow)
+}
+
+// Helper function to get the maximum allowed time window for dashboard
+export const getMaxDashboardTimeWindow = (): TimeWindow => {
+  return "6m"
+}
+
+// Helper function to validate time window for dashboard
+export const isDashboardTimeWindowValid = (timeWindow: TimeWindow): boolean => {
+  const maxIndex = TIME_WINDOW_OPTIONS.findIndex(opt => opt.value === "6m")
+  const currentIndex = TIME_WINDOW_OPTIONS.findIndex(opt => opt.value === timeWindow)
+  return currentIndex <= maxIndex
+}
 
 export interface DateRange {
   from?: Date
@@ -64,7 +88,7 @@ export interface DashboardSummary {
   overall_risk_score: number
   risk_trend: "Rising" | "Falling" | "Stable" | "Volatile"
   critical_alerts: number
-  total_news_today: number
+  total_news_filtered: number
   critical_count: number
   high_count: number
   medium_count: number
@@ -406,10 +430,9 @@ class ApiClient {
 
       // Convert to canvas
       const canvas = await html2canvas(tempContainer, {
-        scale: 2, // Higher quality
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#ffffff'
+        background: '#ffffff'
       })
 
       // Remove temp container

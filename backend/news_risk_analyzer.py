@@ -18,6 +18,7 @@ from huey import SqliteHuey, crontab
 from contextlib import contextmanager
 from threading import Lock
 from dotenv import load_dotenv
+from util import llm_call, validate_risk_analysis
 
 # Load environment variables
 load_dotenv()
@@ -179,6 +180,60 @@ huey = SqliteHuey(name='news_risk_analyzer', filename='news_processing_queue.db'
 # CONSUMER: Background task processing
 # ==========================================
 
+def should_process_news(news_data):
+    """
+    Pre-filter function to quickly determine if news poses any financial risk.
+    Returns True if news should be processed, False if it should be skipped.
+    """
+    try:
+        # Simple prompt to quickly assess financial risk
+        prompt = f"""
+You are a financial risk pre-filter. Your job is to quickly determine if news poses ANY financial risk to banks, markets, or financial institutions.
+
+ONLY return "PROCESS" if the news could pose financial risks such as:
+- Market crashes, volatility, or disruptions
+- Economic downturns, recessions, or financial crises
+- Regulatory changes that could harm banks
+- Company failures, bankruptcies, or major losses
+- Geopolitical events affecting markets
+- Cyber attacks on financial systems
+- Interest rate shocks or monetary policy risks
+- Credit defaults or liquidity problems
+
+Return "SKIP" if the news is:
+- Positive developments (tech breakthroughs, good earnings, etc.)
+- Neutral announcements
+- General news without financial impact
+- Sports, entertainment, or lifestyle content
+
+News to analyze:
+Headline: {news_data['headline']}
+Content: {news_data['story'][:500]}...
+
+Respond with exactly one word: PROCESS or SKIP
+        """
+        
+        # Use the existing llm_call function from util.py
+        response_content = llm_call([{"role": "user", "content": prompt}], temperature=0.1)
+        
+        decision = response_content.strip().upper()
+        
+        if decision == "PROCESS":
+            print(f"🎯 Risk pre-filter: PROCESS - Financial risk detected")
+            return True
+        elif decision == "SKIP":
+            print(f"⏭️ Risk pre-filter: SKIP - No financial risk detected")
+            return False
+        else:
+            # If unclear response, err on the side of processing
+            print(f"⚠️ Risk pre-filter: Unclear response '{decision}' - defaulting to PROCESS")
+            return True
+            
+    except Exception as e:
+        print(f"⚠️ Risk pre-filter error: {e} - defaulting to PROCESS")
+        # If error, process the news to be safe
+        return True
+
 @huey.task(retries=Config.MAX_RETRIES, retry_delay=Config.RETRY_DELAY)
 def process_news_article(news_data):
     """
@@ -202,6 +257,8 @@ def process_news_article(news_data):
     print(f"🔄 Processing news {news_data['newsId']}: {news_data['headline'][:50]}...")
     
     try:
+        # Skip pre-filtering - do full analysis first to get accurate sentiment/risk assessment
+        
         # ==========================================
         # STEP 1: Risk Analysis using Evaluator-Optimizer Pattern
         # ==========================================
@@ -249,7 +306,64 @@ def process_news_article(news_data):
                   f"final status: {optimization_meta['final_evaluation']}")
         
         # ==========================================
-        # STEP 2: Save to Risk Dashboard Database (Using Connection Pool)
+        # STEP 1.6: Post-analysis Sentiment Filter - Skip positive sentiment news
+        # ==========================================
+        
+        print(f"🔍 Post-analysis filtering: Checking if news should be saved...")
+        
+        sentiment_score = risk_analysis.get('sentiment_score', 0.0)
+        
+        # Skip ONLY if sentiment is positive (> 0), regardless of risk level
+        if sentiment_score > 0:
+            print(f"⏭️ Skipping news {news_data['newsId']} - Positive sentiment detected ({sentiment_score:.2f})")
+            
+            # Mark as processed to prevent reprocessing
+            try:
+                with get_knowledge_db_connection() as knowledge_conn:
+                    knowledge_conn.execute("""
+                        UPDATE raw_news_data 
+                        SET processed = 1, processed_at = CURRENT_TIMESTAMP 
+                        WHERE news_id = ?
+                    """, [news_data['newsId']])
+                    knowledge_conn.commit()
+                    print(f"✅ Marked positive news {news_data['newsId']} as processed (skipped)")
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to mark positive news as processed: {e}")
+            
+            return f"Skipped news {news_data['newsId']} - Positive sentiment ({sentiment_score:.2f})"
+        
+        print(f"✅ News has negative/neutral sentiment ({sentiment_score:.2f}) - proceeding to save")
+        
+        # ==========================================
+        # STEP 2: Check for existing news to prevent duplicates
+        # ==========================================
+        
+        # Check if this news already exists in news_articles table
+        with get_risk_db_connection() as risk_conn:
+            existing_news = risk_conn.execute("""
+                SELECT id FROM news_articles 
+                WHERE headline = ? AND source_name = ? AND published_date = ?
+            """, [news_data['headline'], news_data['newsSource'], news_data['creationTimestamp']]).fetchone()
+            
+            if existing_news:
+                # News already exists - mark as processed to prevent reprocessing
+                print(f"⚠️ News already exists in database (ID: {existing_news[0]}), marking as processed...")
+                try:
+                    with get_knowledge_db_connection() as knowledge_conn:
+                        knowledge_conn.execute("""
+                            UPDATE raw_news_data 
+                            SET processed = 1, processed_at = CURRENT_TIMESTAMP 
+                            WHERE news_id = ?
+                        """, [news_data['newsId']])
+                        knowledge_conn.commit()
+                        print(f"✅ Marked duplicate news {news_data['newsId']} as processed")
+                except Exception as e:
+                    print(f"⚠️ Warning: Failed to mark duplicate news as processed: {e}")
+                
+                return f"News {news_data['newsId']} already exists in database (ID: {existing_news[0]})"
+        
+        # ==========================================
+        # STEP 3: Save to Risk Dashboard Database (Using Connection Pool)
         # ==========================================
         
         with get_risk_db_connection() as risk_conn:
@@ -383,28 +497,10 @@ def process_news_article(news_data):
         # Market exposure calculation has been removed as requested
         
         # ==========================================
-        # STEP 4: Mark news as processed in raw_news_data (EARLY)
+        # STEP 4: Continue with processing (processed status updated at the end)
         # ==========================================
         
-        # Mark as processed early to prevent reprocessing even if later steps fail
-        try:
-            with get_knowledge_db_connection() as knowledge_conn:
-                print(f"🔄 Marking news {news_data['newsId']} as processed...")
-                result = knowledge_conn.execute("""
-                    UPDATE raw_news_data 
-                    SET processed = 1, processed_at = CURRENT_TIMESTAMP 
-                    WHERE news_id = ?
-                """, [news_data['newsId']])
-                
-                if result.rowcount == 0:
-                    print(f"⚠️ Warning: No rows updated for news_id {news_data['newsId']} - ID might not exist in raw_news_data")
-                else:
-                    print(f"✅ Marked news {news_data['newsId']} as processed (updated {result.rowcount} row)")
-                
-                knowledge_conn.commit()
-        except Exception as e:
-            print(f"⚠️ Warning: Failed to mark news as processed: {e}")
-            # Don't raise - continue with processing
+        # Don't mark as processed yet - only after successful completion
         
         # ==========================================
         # STEP 5: Update daily risk calculation (real-time)
@@ -442,6 +538,30 @@ def process_news_article(news_data):
         except Exception as e:
             print(f"⚠️ Warning: Failed to trigger SSE event: {e}")
             # Don't raise - continue with processing
+        
+        # ==========================================
+        # FINAL STEP: Mark news as processed ONLY after successful completion
+        # ==========================================
+        
+        # Mark as processed only after ALL processing is complete
+        try:
+            with get_knowledge_db_connection() as knowledge_conn:
+                print(f"🔄 Marking news {news_data['newsId']} as processed...")
+                result = knowledge_conn.execute("""
+                    UPDATE raw_news_data 
+                    SET processed = 1, processed_at = CURRENT_TIMESTAMP 
+                    WHERE news_id = ?
+                """, [news_data['newsId']])
+                
+                if result.rowcount == 0:
+                    print(f"⚠️ Warning: No rows updated for news_id {news_data['newsId']} - ID might not exist in raw_news_data")
+                else:
+                    print(f"✅ Marked news {news_data['newsId']} as processed (updated {result.rowcount} row)")
+                
+                knowledge_conn.commit()
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to mark news as processed: {e}")
+            # Don't raise - processing was successful, just logging failed
         
         print(f"✅ Completed news {news_data['newsId']} → Risk DB ID {risk_db_id} - Risk: {risk_analysis['severity_level']}")
         return f"Successfully processed news {news_data['newsId']} (Risk DB ID: {risk_db_id})"
@@ -605,7 +725,7 @@ def calculate_daily_risk_score():
             # Trigger SSE event for risk calculation update
             risk_conn.execute("""
                 INSERT INTO sse_events (event_type, event_data, created_at)
-                VALUES ('risk_update', ?, datetime('now'))
+                VALUES ('risk_change', ?, datetime('now'))
             """, [json.dumps({
                 'calculation_date': latest_date,
                 'overall_risk_score': round(overall_risk_score, 1),

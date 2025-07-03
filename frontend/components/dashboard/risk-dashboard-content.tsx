@@ -51,10 +51,12 @@ import { AdvancedFilters } from "@/components/dashboard/advanced-filters"
 import { ThemeAnalytics } from "@/components/dashboard/theme-analytics"
 import { TimeWindowSelector } from "@/components/dashboard/time-window-selector"
 import { CriticalAlerts } from "@/components/dashboard/critical-alerts"
+import { LiveUpdatesNotification } from "@/components/dashboard/live-updates-notification"
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { useDashboardSSE } from "@/hooks/use-dashboard-sse"
 import { apiClient } from "@/lib/api-client"
 import type { DashboardData, NewsArticle, TimeWindow, DateRange } from "@/lib/api-client"
+import { isLiveTimeWindow } from "@/lib/api-client"
 import { formatRelativeTime } from "@/lib/time-utils"
 import { RiskFilters, DEFAULT_FILTERS, applyFilters } from "@/lib/filters"
 import { getUrgencyColor, getTemporalImpactColor } from "@/lib/risk-utils"
@@ -66,7 +68,7 @@ export default function RiskDashboardContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState<RiskFilters>(DEFAULT_FILTERS)
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h")
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("today")
   const [dateRange, setDateRange] = useState<DateRange>({})
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedNews, setSelectedNews] = useState<NewsArticle | null>(null)
@@ -74,7 +76,7 @@ export default function RiskDashboardContent() {
   const { isMobile } = useSidebar()
 
   // Use SSE for real-time updates
-  const { data: sseData, status: sseStatus } = useDashboardSSE()
+  const { data: sseData, status: sseStatus, clearPendingUpdates, clearSSEData } = useDashboardSSE(timeWindow)
 
   // Fetch initial dashboard data
   useEffect(() => {
@@ -83,8 +85,12 @@ export default function RiskDashboardContent() {
         setLoading(true)
         console.log("Starting API calls with time window:", timeWindow)
         
+        // Clear SSE data when time window changes to prevent stale data
+        console.log("Clearing SSE data for new time window:", timeWindow)
+        clearSSEData()
+        
         const dashboardPromise = apiClient.getDashboardData(timeWindow, dateRange)
-        const newsPromise = apiClient.getNewsFeed(10, timeWindow, dateRange)
+        const newsPromise = apiClient.getNewsFeed(20, timeWindow, dateRange)  // Increased limit and uses dashboard time window
         
         console.log("Fetching dashboard data from:", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/risk/dashboard`)
         console.log("Fetching news feed from:", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/news/feed`)
@@ -122,16 +128,29 @@ export default function RiskDashboardContent() {
     try {
       const [dashboardData, newsResponse] = await Promise.all([
         apiClient.getDashboardData(timeWindow, dateRange),
-        apiClient.getNewsFeed(10, timeWindow, dateRange)
+        apiClient.getNewsFeed(20, timeWindow, dateRange)  // Uses main dashboard time window
       ])
       setInitialData(dashboardData)
       setNewsData(newsResponse.articles)
       setError(null)
+      clearPendingUpdates()
       console.log("Data refreshed manually with time window:", timeWindow)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to refresh data")
       console.error("Manual refresh error:", err)
     }
+  }
+
+  // Handle switching to live view
+  const handleSwitchToLive = () => {
+    setTimeWindow("today")
+    clearPendingUpdates()
+  }
+
+  // Handle dismissing live update notifications
+  const handleDismissNotification = () => {
+    // Just dismiss the notification, don't clear pending updates
+    // This allows the user to dismiss the notification but still see the count
   }
 
   // Merge initial data with SSE updates
@@ -324,6 +343,16 @@ export default function RiskDashboardContent() {
 
   return (
     <>
+      {/* Live Updates Notification */}
+      <LiveUpdatesNotification
+        currentTimeWindow={timeWindow}
+        hasLiveUpdates={sseStatus.hasLiveUpdates}
+        pendingUpdatesCount={sseStatus.pendingUpdatesCount}
+        onSwitchToLive={handleSwitchToLive}
+        onRefresh={handleRefresh}
+        onDismiss={handleDismissNotification}
+      />
+      
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4 flex-shrink-0">
         {isMobile && <SidebarTrigger className="sm:hidden" />}
 
@@ -347,14 +376,7 @@ export default function RiskDashboardContent() {
           )}
         </div>
 
-        <div className="relative flex-1 md:grow-0">
-          <SearchIcon className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Search risks, news, countries..."
-            className="w-full rounded-lg bg-background pl-8 md:w-[280px] lg:w-[320px]"
-          />
-        </div>
+
         <div className="ml-auto flex items-center gap-2">
           <TimeWindowSelector 
             value={timeWindow} 
@@ -407,7 +429,7 @@ export default function RiskDashboardContent() {
               </span>
             </div>
             <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-100">
-              {dashboardData.dashboard_summary.total_news_today} articles
+              {dashboardData.dashboard_summary.total_news_filtered} articles
             </Badge>
           </div>
         </div>
@@ -420,7 +442,12 @@ export default function RiskDashboardContent() {
               <div className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle>Live News Feed</CardTitle>
-                  <CardDescription>Real-time news impacting financial risk.</CardDescription>
+                  <CardDescription>
+                    Real-time news impacting financial risk
+                    <Badge variant="outline" className="ml-2 text-xs">
+                      {dashboardData.time_window_description || "filtered by dashboard time window"}
+                    </Badge>
+                  </CardDescription>
                 </div>
                 <div className="relative w-full max-w-sm">
                   <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -721,7 +748,7 @@ export default function RiskDashboardContent() {
                     <div className="text-xs text-muted-foreground">
                       <div className="flex justify-between">
                         <span>Articles analyzed:</span>
-                        <span className="font-medium">{dashboardData.dashboard_summary.total_news_today}</span>
+                        <span className="font-medium">{dashboardData.dashboard_summary.total_news_filtered}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Max individual risk:</span>

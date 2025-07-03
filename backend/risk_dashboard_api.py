@@ -189,7 +189,7 @@ def format_risk_calculation(row: sqlite3.Row) -> Dict[str, Any]:
         "created_at": row["created_at"]
     }
 
-def time_window_to_datetime_clause(time_window: str = "24h", from_date: str = None, to_date: str = None) -> str:
+def time_window_to_datetime_clause(time_window: str = "today", from_date: str = None, to_date: str = None) -> str:
     """Convert time window string to SQLite datetime clause"""
     if time_window == "custom" and from_date and to_date:
         return f"published_date >= '{from_date}' AND published_date <= '{to_date} 23:59:59'"
@@ -198,20 +198,30 @@ def time_window_to_datetime_clause(time_window: str = "24h", from_date: str = No
     elif time_window == "custom" and to_date:
         return f"published_date <= '{to_date} 23:59:59'"
     
-    window_map = {
-        "1h": "'-1 hour'",
-        "6h": "'-6 hours'", 
-        "24h": "'-24 hours'",
-        "today": "'start of day'",
-        "7d": "'-7 days'"
-    }
-    
+    # Handle special cases first
     if time_window == "today":
         return f"published_date >= datetime('now', 'start of day')"
-    else:
-        return f"published_date >= datetime('now', {window_map.get(time_window, "'-24 hours'")})"
+    elif time_window == "yesterday":
+        return f"published_date >= datetime('now', '-1 day', 'start of day') AND published_date < datetime('now', 'start of day')"
+    
+    # Map time windows to SQLite modifiers
+    window_map = {
+        "1h": "'-1 hour'",
+        "4h": "'-4 hours'",
+        "8h": "'-8 hours'", 
+        "12h": "'-12 hours'",
+        "3d": "'-3 days'",
+        "7d": "'-7 days'",
+        "14d": "'-14 days'",
+        "1m": "'-30 days'",
+        "3m": "'-90 days'",
+        "6m": "'-180 days'"
+    }
+    
+    modifier = window_map.get(time_window, "'-1 day'")  # Default to today
+    return f"published_date >= datetime('now', {modifier})"
 
-def get_time_window_description(time_window: str = "24h", from_date: str = None, to_date: str = None) -> str:
+def get_time_window_description(time_window: str = "today", from_date: str = None, to_date: str = None) -> str:
     """Get human readable description of time window"""
     if time_window == "custom":
         if from_date and to_date:
@@ -225,12 +235,19 @@ def get_time_window_description(time_window: str = "24h", from_date: str = None,
     
     descriptions = {
         "1h": "last hour",
-        "6h": "last 6 hours",
-        "24h": "last 24 hours", 
-        "today": "today",
-        "7d": "past week"
+        "4h": "last 4 hours",
+        "8h": "last 8 hours",
+        "12h": "last 12 hours",
+        "today": "today (midnight to now)",
+        "yesterday": "yesterday (full day)",
+        "3d": "last 3 days",
+        "7d": "last 7 days",
+        "14d": "last 14 days",
+        "1m": "last month (30 days)",
+        "3m": "last 3 months (90 days)",
+        "6m": "last 6 months (180 days)"
     }
-    return descriptions.get(time_window, "last 24 hours")
+    return descriptions.get(time_window, "today")
 
 # ==========================================
 # NEWS ENDPOINTS
@@ -244,7 +261,7 @@ async def get_latest_news(
     risk_category: Optional[str] = Query(None),
     is_trending: Optional[bool] = Query(None),
     is_breaking: Optional[bool] = Query(None),
-    time_window: str = Query("24h", description="Time window for news filtering (1h, 6h, 24h, today, 7d)")
+    time_window: str = Query("today", description="Time window for news filtering (1h, 4h, 8h, 12h, today, yesterday, 3d, 7d, 14d, 1m, 3m, 6m)")
 ):
     """Get latest news articles with optional filtering"""
     try:
@@ -307,7 +324,7 @@ async def get_latest_news(
 @app.get("/api/news/feed")
 async def get_recent_news_feed(
     limit: int = Query(20, ge=1, le=50),
-    time_window: str = Query("24h", regex="^(1h|6h|24h|today|7d|custom)$"),
+    time_window: str = Query("today", regex="^(1h|4h|8h|12h|today|yesterday|3d|7d|14d|1m|3m|6m|custom)$"),
     from_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
     to_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 ):
@@ -420,7 +437,7 @@ async def get_news_article(news_id: int):
 
 @app.get("/api/risk/dashboard")
 async def get_dashboard_summary(
-    time_window: str = Query("24h", regex="^(1h|6h|24h|today|7d|custom)$"),
+    time_window: str = Query("today", regex="^(1h|4h|8h|12h|today|yesterday|3d|7d|14d|1m|3m|6m|custom)$"),
     from_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
     to_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 ):
@@ -518,8 +535,8 @@ async def get_dashboard_summary(
                         SELECT COUNT(*) 
                         FROM news_articles
                         WHERE status != 'Archived'
-                          AND {time_clause}
-                          AND primary_risk_category IS NOT NULL
+                        AND published_date >= datetime('now', '-7 days')
+                        AND primary_risk_category IS NOT NULL
                     ), 1) as percentage,
                     CASE primary_risk_category
                         WHEN 'market_risk' THEN '#3B82F6'
@@ -570,7 +587,7 @@ async def get_dashboard_summary(
                     "overall_risk_score": risk_calc["overall_risk_score"] if risk_calc else 0.0,
                     "risk_trend": risk_calc["risk_trend"] if risk_calc else "Stable",
                     "critical_alerts": counts_data["critical_alerts"] or 0,
-                    "total_news_today": counts_data["total_news"] or 0,
+                    "total_news_filtered": counts_data["total_news"] or 0,
                     "critical_count": counts_data["critical_count"] or 0,
                     "high_count": counts_data["high_count"] or 0,
                     "medium_count": counts_data["medium_count"] or 0,
@@ -726,8 +743,6 @@ async def get_trend_analytics(days: int = Query(7, ge=1, le=30)):
 # VIEW-BASED ENDPOINTS (OPTIMIZED QUERIES)
 # ==========================================
 
-
-
 @app.get("/api/dashboard/risk-breakdown")
 async def get_risk_breakdown():
     """Get risk category breakdown using optimized view"""
@@ -752,8 +767,6 @@ async def get_risk_breakdown():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error9 (get_risk_breakdown): {str(e)}")
 
-
-
 @app.get("/api/dashboard/summary")
 async def get_dashboard_only_summary():
     """Get basic dashboard summary using optimized view"""
@@ -770,7 +783,7 @@ async def get_dashboard_only_summary():
             
             return {
                 "summary": {
-                    "total_news_today": row["total_news_today"],
+                    "total_news_filtered": row["total_news_today"],
                     "critical_count": row["critical_count"],
                     "high_count": row["high_count"],
                     "avg_sentiment": row["avg_sentiment"],
@@ -833,7 +846,6 @@ async def get_theme_statistics():
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error (theme_statistics): {str(e)}")
-
 
 @app.get("/api/themes/{theme_id}/articles")
 async def get_theme_articles(
@@ -906,7 +918,6 @@ async def get_theme_articles(
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error (theme_articles): {str(e)}")
-
 
 @app.post("/api/themes/{theme_id}/storyline")
 async def generate_theme_storyline(
@@ -1088,7 +1099,6 @@ async def generate_theme_storyline(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Storyline generation error: {str(e)}")
 
-
 @app.get("/api/storylines")
 async def get_recent_storylines():
     """
@@ -1159,9 +1169,13 @@ async def stream_dashboard_updates():
             last_event_id=last_event_id
         )
         
-        # Track periodic update timers
+        # Track periodic update timers and last values
         last_periodic_checks = {
             'alerts': datetime.now()
+        }
+        last_alert_state = {
+            'critical_count': None,
+            'last_emitted': None
         }
         
         while True:
@@ -1204,7 +1218,7 @@ async def stream_dashboard_updates():
                     SSEEventManager.mark_events_processed(processed_ids)
                 
                 # 2. Periodic updates for non-event-driven data
-                await handle_periodic_updates(current_time, last_periodic_checks)
+                await handle_periodic_updates(current_time, last_periodic_checks, last_alert_state)
                 
             except Exception as e:
                 # Use new error event system
@@ -1249,15 +1263,26 @@ async def stream_dashboard_updates():
                             formatted_article["minutes_ago"] = minutes_ago
                             news_data.append(formatted_article)
                         except Exception as format_error:
-                            print(f"⚠️ Error formatting article {row.get('id', 'unknown')}: {format_error}")
+                            # Safe way to get ID from sqlite3.Row
+                            try:
+                                article_id = row["id"] if "id" in row.keys() else "unknown"
+                            except (KeyError, TypeError):
+                                article_id = "unknown"
+                            print(f"⚠️ Error formatting article {article_id}: {format_error}")
                             # Create a minimal article object for safety
+                            def safe_row_get(row, key, default=None):
+                                try:
+                                    return row[key] if key in row.keys() else default
+                                except (KeyError, TypeError):
+                                    return default
+                                    
                             news_data.append({
-                                "id": row.get("id", 0),
-                                "headline": row.get("headline", "Unknown"),
-                                "source_name": row.get("source_name", "Unknown"),
-                                "published_date": row.get("published_date", ""),
-                                "severity_level": row.get("severity_level", "Low"),
-                                "primary_risk_category": row.get("primary_risk_category", "Unknown"),
+                                "id": safe_row_get(row, "id", 0),
+                                "headline": safe_row_get(row, "headline", "Unknown"),
+                                "source_name": safe_row_get(row, "source_name", "Unknown"),
+                                "published_date": safe_row_get(row, "published_date", ""),
+                                "severity_level": safe_row_get(row, "severity_level", "Low"),
+                                "primary_risk_category": safe_row_get(row, "primary_risk_category", "Unknown"),
                                 "minutes_ago": 0
                             })
                     
@@ -1267,39 +1292,81 @@ async def stream_dashboard_updates():
                         triggered_by_event=trigger_event_id
                     )
                     
-                    # Cascade 2: Update dashboard summary
-                    dashboard_summary = conn.execute("SELECT * FROM dashboard_summary").fetchone()
-                    if dashboard_summary:
-                        try:
+                    # Cascade 2: Update dashboard summary (use dynamic calculation for 24h window)
+                    try:
+                        # Use 7-day time window for SSE updates (captures more articles for testing)
+                        dashboard_counts = conn.execute("""
+                            SELECT 
+                                COUNT(*) as total_news_today,
+                                SUM(CASE WHEN severity_level = 'Critical' THEN 1 ELSE 0 END) as critical_count,
+                                SUM(CASE WHEN severity_level = 'High' THEN 1 ELSE 0 END) as high_count,
+                                SUM(CASE WHEN severity_level = 'Medium' THEN 1 ELSE 0 END) as medium_count,
+                                SUM(CASE WHEN severity_level = 'Low' THEN 1 ELSE 0 END) as low_count,
+                                AVG(sentiment_score) as avg_sentiment,
+                                MAX(overall_risk_score) as current_risk_score
+                            FROM news_articles 
+                            WHERE status != 'Archived'
+                            AND published_date >= datetime('now', '-7 days')
+                        """).fetchone()
+                        
+                        if dashboard_counts:
                             emit_dashboard_summary_update(
-                                total_news_today=dashboard_summary.get("total_news_today", 0),
-                                critical_count=dashboard_summary.get("critical_count", 0),
-                                high_count=dashboard_summary.get("high_count", 0),
-                                medium_count=dashboard_summary.get("medium_count", 0),
-                                low_count=dashboard_summary.get("low_count", 0),
-                                avg_sentiment=dashboard_summary.get("avg_sentiment", 0.0),
-                                current_risk_score=dashboard_summary.get("current_risk_score", 0.0)
+                                total_news_filtered=dashboard_counts["total_news_today"] or 0,
+                                critical_count=dashboard_counts["critical_count"] or 0,
+                                high_count=dashboard_counts["high_count"] or 0,
+                                medium_count=dashboard_counts["medium_count"] or 0,
+                                low_count=dashboard_counts["low_count"] or 0,
+                                avg_sentiment=dashboard_counts["avg_sentiment"] or 0.0,
+                                current_risk_score=dashboard_counts["current_risk_score"] or 0.0
                             )
-                        except Exception as summary_error:
-                            print(f"⚠️ Error emitting dashboard summary: {summary_error}")
-                            print(f"Available keys: {list(dashboard_summary.keys()) if hasattr(dashboard_summary, 'keys') else 'No keys method'}")
+                            print(f"📊 Dashboard summary updated: {dashboard_counts['total_news_today']} articles, {dashboard_counts['medium_count']} medium")
+                        
+                    except Exception as summary_error:
+                        print(f"⚠️ Error calculating dashboard summary: {summary_error}")
                     
-                    # Cascade 3: Update risk breakdown
-                    risk_breakdown = conn.execute("SELECT * FROM dashboard_risk_breakdown").fetchall()
-                    breakdown_data = []
-                    for row in risk_breakdown:
-                        try:
+                    # Cascade 3: Update risk breakdown (use dynamic calculation for 24h window)
+                    try:
+                        risk_breakdown = conn.execute("""
+                            SELECT 
+                                primary_risk_category,
+                                COUNT(*) as news_count,
+                                ROUND(COUNT(*) * 100.0 / (
+                                    SELECT COUNT(*) 
+                                    FROM news_articles
+                                    WHERE status != 'Archived'
+                                    AND published_date >= datetime('now', '-7 days')
+                                    AND primary_risk_category IS NOT NULL
+                                ), 1) as percentage,
+                                CASE primary_risk_category
+                                    WHEN 'market_risk' THEN '#3B82F6'
+                                    WHEN 'credit_risk' THEN '#EF4444'
+                                    WHEN 'operational_risk' THEN '#F59E0B'
+                                    WHEN 'liquidity_risk' THEN '#10B981'
+                                    ELSE '#6B7280'
+                                END as chart_color
+                            FROM news_articles
+                            WHERE status != 'Archived'
+                            AND published_date >= datetime('now', '-7 days')
+                            AND primary_risk_category IS NOT NULL
+                            GROUP BY primary_risk_category
+                            ORDER BY news_count DESC
+                        """).fetchall()
+                        
+                        breakdown_data = []
+                        for row in risk_breakdown:
                             breakdown_data.append({
-                                "category": row.get("primary_risk_category", "Unknown"),
-                                "news_count": row.get("news_count", 0),
-                                "percentage": row.get("percentage", 0.0),
-                                "chart_color": row.get("chart_color", "#gray")
+                                "category": row["primary_risk_category"],
+                                "news_count": row["news_count"],
+                                "percentage": row["percentage"],
+                                "chart_color": row["chart_color"]
                             })
-                        except Exception as breakdown_error:
-                            print(f"⚠️ Error processing risk breakdown row: {breakdown_error}")
-                    
-                    if breakdown_data:  # Only emit if we have valid data
-                        emit_risk_breakdown_update(breakdown=breakdown_data)
+                        
+                        if breakdown_data:  # Only emit if we have valid data
+                            emit_risk_breakdown_update(breakdown=breakdown_data)
+                            print(f"📊 Risk breakdown updated: {len(breakdown_data)} categories")
+                            
+                    except Exception as breakdown_error:
+                        print(f"⚠️ Error calculating risk breakdown: {breakdown_error}")
                 
                 elif original_event_type in ['risk_update', 'risk_score_update']:
                     # Get latest risk calculation
@@ -1322,12 +1389,12 @@ async def stream_dashboard_updates():
                 context=f"original_event_type: {original_event_type}"
             )
     
-    async def handle_periodic_updates(current_time: datetime, last_checks: Dict):
+    async def handle_periodic_updates(current_time: datetime, last_checks: Dict, last_alert_state: Dict):
         """Handle periodic updates for non-event-driven data"""
         try:
             with get_risk_db_connection() as conn:
                 
-                # Critical alerts (every cycle)
+                # Critical alerts (only emit if changed or after 5 minutes)
                 critical_alerts = conn.execute("""
                     SELECT COUNT(*) as count FROM news_articles 
                     WHERE severity_level = 'Critical' 
@@ -1335,10 +1402,29 @@ async def stream_dashboard_updates():
                     AND status != 'Archived'
                 """).fetchone()
                 
-                emit_alerts_update(
-                    critical_count=critical_alerts["count"],
-                    last_check=current_time.isoformat()
-                )
+                current_critical_count = critical_alerts["count"]
+                should_emit_alert = False
+                
+                # Check if critical count has changed
+                if last_alert_state['critical_count'] != current_critical_count:
+                    should_emit_alert = True
+                    print(f"🔔 Critical count changed: {last_alert_state['critical_count']} → {current_critical_count}")
+                
+                # Or if it's been more than 5 minutes since last emission
+                elif (last_alert_state['last_emitted'] is None or 
+                      (current_time - last_alert_state['last_emitted']).total_seconds() > 300):
+                    should_emit_alert = True
+                    print(f"⏰ Alert update due to time interval (5 minutes)")
+                
+                if should_emit_alert:
+                    emit_alerts_update(
+                        critical_count=current_critical_count,
+                        last_check=current_time.isoformat()
+                    )
+                    
+                    # Update tracking state
+                    last_alert_state['critical_count'] = current_critical_count
+                    last_alert_state['last_emitted'] = current_time
                 
         except Exception as e:
             emit_error_event(

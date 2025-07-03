@@ -4,13 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Slider } from "@/components/ui/slider"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+// Select components removed - no longer needed since time range is controlled by main dashboard
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -26,7 +20,6 @@ import {
   RiskFilters, 
   DEFAULT_FILTERS, 
   SEVERITY_OPTIONS, 
-  TIME_RANGE_OPTIONS,
   INDUSTRY_SECTORS,
   SMART_PRESETS,
   FilterPreset,
@@ -121,22 +114,7 @@ export function QuickFilters({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Time Range - Compact */}
-        <Select
-          value={filters.timeRange}
-          onValueChange={(value) => updateFilters({ timeRange: value })}
-        >
-          <SelectTrigger className="w-24 h-8 text-xs">
-            <SelectValue placeholder="Time" />
-          </SelectTrigger>
-          <SelectContent>
-            {TIME_RANGE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Time Range removed - now uses main dashboard time window */}
 
         {/* Breaking News Toggle - Compact */}
         <div className="flex items-center gap-1">
@@ -268,15 +246,7 @@ export function QuickFilters({
             </Badge>
           ))}
           
-          {filters.timeRange !== 'all' && (
-            <Badge variant="secondary" className="gap-1 text-xs h-6">
-              {TIME_RANGE_OPTIONS.find(opt => opt.value === filters.timeRange)?.label}
-              <X 
-                className="h-3 w-3 cursor-pointer" 
-                onClick={() => updateFilters({ timeRange: 'all' })}
-              />
-            </Badge>
-          )}
+          {/* Time range badge removed - now shown in main dashboard */}
           
           {filters.breakingNewsOnly && (
             <Badge variant="secondary" className="gap-1 text-xs h-6">

@@ -15,6 +15,19 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv(override=True)  # Force reload environment variables
 
+
+def safe_json_loads(field_value, default=None):
+    """Safely parse JSON with error handling"""
+    if not field_value:
+        return default if default is not None else []
+    try:
+        return json.loads(field_value)
+    except json.JSONDecodeError as e:
+        print(f"JSON parse error: {e}")
+        print(f"Problematic value: {repr(field_value)}")
+        return default if default is not None else []
+
+
 # Initialize LLM client based on provider configuration
 def _initialize_llm_client():
     """Initialize the appropriate OpenAI client based on configuration"""
@@ -214,6 +227,18 @@ def validate_risk_analysis(analysis: Dict[str, Any]) -> Dict[str, Any]:
         valid_severities = ['Critical', 'High', 'Medium', 'Low']
         if analysis['severity_level'] not in valid_severities:
             raise ValueError(f"Invalid severity level: {analysis['severity_level']}")
+        
+        # Validate urgency level
+        valid_urgency_levels = ['Critical', 'High', 'Medium', 'Low']
+        if 'urgency_level' in analysis and analysis['urgency_level'] not in valid_urgency_levels:
+            print(f"⚠️ Warning: Invalid urgency level '{analysis['urgency_level']}', defaulting to 'Medium'")
+            analysis['urgency_level'] = 'Medium'
+        
+        # Validate temporal impact
+        valid_temporal_impacts = ['Immediate', 'Short-term', 'Medium-term', 'Long-term']
+        if 'temporal_impact' in analysis and analysis['temporal_impact'] not in valid_temporal_impacts:
+            print(f"⚠️ Warning: Invalid temporal impact '{analysis['temporal_impact']}', defaulting to 'Medium-term'")
+            analysis['temporal_impact'] = 'Medium-term'
         
         # Validate primary risk category
         valid_categories = [

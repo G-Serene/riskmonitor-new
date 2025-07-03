@@ -5,7 +5,9 @@ import type {
   NewsArticle,
   DashboardSummary,
   RiskBreakdown,
+  TimeWindow,
 } from "@/lib/api-client"
+import { isLiveTimeWindow } from "@/lib/api-client"
 
 interface SSEDashboardData {
   dashboardSummary: DashboardSummary | null
@@ -20,9 +22,11 @@ interface SSEStatus {
   isConnected: boolean
   lastUpdate: string | null
   error: string | null
+  pendingUpdatesCount: number
+  hasLiveUpdates: boolean
 }
 
-export function useDashboardSSE() {
+export function useDashboardSSE(currentTimeWindow: TimeWindow = "today") {
   const [data, setData] = useState<SSEDashboardData>({
     dashboardSummary: null,
     newsArticles: [],
@@ -36,10 +40,32 @@ export function useDashboardSSE() {
     isConnected: false,
     lastUpdate: null,
     error: null,
+    pendingUpdatesCount: 0,
+    hasLiveUpdates: false,
   })
 
   const eventSourceRef = useRef<EventSource | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Function to clear pending updates (when switching to live view or manual refresh)
+  const clearPendingUpdates = useCallback(() => {
+    setStatus(prev => ({
+      ...prev,
+      pendingUpdatesCount: 0,
+      hasLiveUpdates: false,
+    }))
+  }, [])
+
+  // Function to increment pending updates (when not in live mode)
+  const incrementPendingUpdates = useCallback(() => {
+    if (!isLiveTimeWindow(currentTimeWindow)) {
+      setStatus(prev => ({
+        ...prev,
+        pendingUpdatesCount: prev.pendingUpdatesCount + 1,
+        hasLiveUpdates: true,
+      }))
+    }
+  }, [currentTimeWindow])
 
   // Helper function to safely parse JSON from SSE events
   const safeJsonParse = (data: string, eventType: string) => {
@@ -97,6 +123,8 @@ export function useDashboardSSE() {
         console.log("📈 [SSE] Handling news_update event")
         // Trigger a refresh of the news feed
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
+        // Track pending updates if viewing historical data
+        incrementPendingUpdates()
         break
         
       case 'news_feed_update':
@@ -153,6 +181,7 @@ export function useDashboardSSE() {
           riskTrend: actualData.risk_trend || prev.riskTrend,
         }))
         setStatus((prev) => ({ ...prev, lastUpdate: currentTime }))
+        // Don't increment pending updates for background recalculations
         break
         
 
@@ -502,5 +531,25 @@ export function useDashboardSSE() {
     }
   }, [connect])
 
-  return { data, status, reconnect: connect }
+  const clearSSEData = () => {
+    console.log("🧹 [SSE] Clearing SSE data for new time window")
+    setData({
+      dashboardSummary: null,
+      newsArticles: [],
+      riskBreakdown: [],
+      criticalAlerts: 0,
+      overallRiskScore: 0,
+      riskTrend: "Stable",
+    })
+    clearPendingUpdates()
+  }
+
+  return { 
+    data, 
+    status, 
+    reconnect: connect, 
+    clearPendingUpdates,
+    incrementPendingUpdates,
+    clearSSEData
+  }
 }

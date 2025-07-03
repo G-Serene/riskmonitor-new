@@ -275,14 +275,14 @@ def emit_risk_score_update(overall_risk_score: float, risk_trend: str,
         }
     )
 
-def emit_dashboard_summary_update(total_news_today: int, critical_count: int, 
+def emit_dashboard_summary_update(total_news_filtered: int, critical_count: int, 
                                  high_count: int, medium_count: int, low_count: int, 
                                  avg_sentiment: float, current_risk_score: float):
     """Emit a dashboard summary update event"""
     return SSEEventManager.emit_event(
         'dashboard_summary_update',
         {
-            'total_news_today': total_news_today,
+            'total_news_filtered': total_news_filtered,
             'critical_count': critical_count,
             'high_count': high_count,
             'medium_count': medium_count,

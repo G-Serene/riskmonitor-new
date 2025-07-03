@@ -4,7 +4,7 @@ export interface RiskFilters {
   // Quick filters (header)
   riskScoreRange: [number, number] // [min, max] 0-10
   severityLevels: string[] // ['Critical', 'High', 'Medium', 'Low']
-  timeRange: string // '1h', '6h', '24h', '3d', '1w', 'all'
+  // timeRange removed - now uses main dashboard time window
   breakingNewsOnly: boolean
   industrySectors: string[] // Industry sector filtering
   
@@ -36,7 +36,7 @@ export interface FilterPreset {
 export const DEFAULT_FILTERS: RiskFilters = {
   riskScoreRange: [0, 10],
   severityLevels: [],
-  timeRange: 'all', // Don't filter by time on frontend since backend already does it
+  // timeRange removed - now controlled by main dashboard time window
   breakingNewsOnly: false,
   industrySectors: [],
   countries: [],
@@ -59,8 +59,8 @@ export const SMART_PRESETS: FilterPreset[] = [
     icon: '🚨',
     filters: {
       riskScoreRange: [8.0, 10],
-      severityLevels: ['Critical', 'High'],
-      timeRange: '6h'
+      severityLevels: ['Critical', 'High']
+      // timeRange removed - uses main dashboard time window
     }
   },
   {
@@ -71,8 +71,8 @@ export const SMART_PRESETS: FilterPreset[] = [
     filters: {
       breakingNewsOnly: true,
       marketMovingOnly: true,
-      riskScoreRange: [6.0, 10],
-      timeRange: '3h'
+      riskScoreRange: [6.0, 10]
+      // timeRange removed - uses main dashboard time window
     }
   },
   {
@@ -81,8 +81,8 @@ export const SMART_PRESETS: FilterPreset[] = [
     description: 'Geographic risk concentration analysis',
     icon: '🌍',
     filters: {
-      riskScoreRange: [5.0, 10],
-      timeRange: '24h',
+      riskScoreRange: [5.0, 10]
+      // timeRange removed - uses main dashboard time window
       // Will be populated with user's region preferences
     }
   },
@@ -93,8 +93,8 @@ export const SMART_PRESETS: FilterPreset[] = [
     icon: '⚠️',
     filters: {
       requiresActionOnly: true,
-      riskScoreRange: [7.0, 10],
-      timeRange: '12h'
+      riskScoreRange: [7.0, 10]
+      // timeRange removed - uses main dashboard time window
     }
   },
   {
@@ -104,8 +104,8 @@ export const SMART_PRESETS: FilterPreset[] = [
     icon: '📋',
     filters: {
       regulatoryOnly: true,
-      riskScoreRange: [4.0, 10],
-      timeRange: '1w'
+      riskScoreRange: [4.0, 10]
+      // timeRange removed - uses main dashboard time window
     }
   }
 ]
@@ -117,14 +117,8 @@ export const SEVERITY_OPTIONS = [
   { value: 'Low', label: 'Low', color: 'bg-green-500' }
 ]
 
-export const TIME_RANGE_OPTIONS = [
-  { value: '1h', label: 'Last Hour' },
-  { value: '6h', label: 'Last 6 Hours' },
-  { value: '24h', label: 'Last 24 Hours' },
-  { value: '3d', label: 'Last 3 Days' },
-  { value: '1w', label: 'Last Week' },
-  { value: 'all', label: 'All Time' }
-]
+// TIME_RANGE_OPTIONS removed - news feed now uses main dashboard time window
+// All time filtering is handled by the backend API based on the main time window selection
 
 export const INDUSTRY_SECTORS = [
   { value: 'financial_services', label: 'Financial Services' },
@@ -164,24 +158,8 @@ export function applyFilters(articles: any[], filters: RiskFilters): any[] {
       return false
     }
     
-    // Time range
-    if (filters.timeRange !== 'all') {
-      const now = new Date()
-      const articleDate = new Date(article.published_date)
-      const hoursDiff = (now.getTime() - articleDate.getTime()) / (1000 * 60 * 60)
-      
-      const timeRanges = {
-        '1h': 1,
-        '6h': 6,
-        '24h': 24,
-        '3d': 72,
-        '1w': 168
-      }
-      
-      if (hoursDiff > timeRanges[filters.timeRange as keyof typeof timeRanges]) {
-        return false
-      }
-    }
+    // Time range filtering removed - now handled by main dashboard time window
+    // The backend API already filters by time window, so frontend doesn't need to
     
     // Breaking news only
     if (filters.breakingNewsOnly && !article.is_breaking_news) {
@@ -277,10 +255,7 @@ export function getFilterSummary(filters: RiskFilters): string {
     activeFilters.push(`Severity: ${filters.severityLevels.join(', ')}`)
   }
   
-  if (filters.timeRange !== 'all') {
-    const timeLabel = TIME_RANGE_OPTIONS.find(opt => opt.value === filters.timeRange)?.label
-    activeFilters.push(`Time: ${timeLabel}`)
-  }
+  // Time range removed - now shown in main dashboard time window
   
   if (filters.breakingNewsOnly) activeFilters.push('Breaking News')
   if (filters.industrySectors.length > 0) {

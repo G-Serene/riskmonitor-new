@@ -62,7 +62,7 @@ class RiskAnalysisEvaluatorOptimizer:
         
         {feedback_context}
         
-        Return JSON with exactly these fields:
+        Return JSON with exactly this JSON format:
         {{
             "primary_risk_category": "market_risk OR credit_risk OR operational_risk OR liquidity_risk OR cybersecurity_risk OR regulatory_risk OR systemic_risk OR reputational_risk (choose ONE primary category)",
             "secondary_risk_categories": ["additional risk categories that also apply from the above list"],
@@ -70,24 +70,24 @@ class RiskAnalysisEvaluatorOptimizer:
             "severity_level": "Critical|High|Medium|Low",
             "urgency_level": "Critical|High|Medium|Low", 
             "temporal_impact": "Immediate|Short-term|Medium-term|Long-term",
-            "sentiment_score": -0.8,
-            "confidence_score": 85,
-            "impact_score": 75,
-            "financial_exposure": 1500000000,
-            "risk_contribution": 15.5,
-            "geographic_regions": ["europe", "north_america", "asia_pacific"],
-            "industry_sectors": ["financial_services"],
-            "countries": ["Germany", "France"],
-            "coordinates": {{"lat": 51.1657, "lng": 10.4515}},
-            "affected_markets": ["DAX", "CAC40"],
-            "keywords": ["ecb", "interest_rates", "banking", "inflation"],
-            "entities": ["European Central Bank", "Christine Lagarde"],
-            "is_market_moving": true,
-            "is_breaking_news": false,
-            "is_regulatory": true,
-            "requires_action": true,
+            "sentiment_score": "SENTIMENT_SCORE_HERE in range -1 to 1. assign negative if the news is negative else positive",
+            "confidence_score": "CONFIDENCE_SCORE_HERE in range 0 to 100. assign 0 if the news is not clear else 100",
+            "impact_score": "IMPACT_SCORE_HERE in range 0 to 100. assign 0 if the news is not clear else 100",
+            "financial_exposure": "FINANCIAL_EXPOSURE_HERE in range 0 to 1000000000. assign 0 if the news is doesnt include financial exposure else actual value",
+            "risk_contribution": "RISK_CONTRIBUTION_HERE in range 0 to 100. assign 0 if the news is doesnt include risk contribution else actual value",
+            "geographic_regions": ["geographic_regions_here"],
+            "industry_sectors": ["industry_sectors_here"],
+            "countries": ["countries_here"],
+            "coordinates": {{"lat": "LATITUDE_HERE", "lng": "LONGITUDE_HERE"}},
+            "affected_markets": ["affected_markets_here"],
+            "keywords": ["keywords_here"],
+            "entities": ["entities_here"],
+            "is_market_moving": "true or false. assign true if the news is a market moving event else false",
+            "is_breaking_news": "true or false. assign true if the news is a breaking news event else false",
+            "is_regulatory": "true or false. assign true if the news is a regulatory event else false",
+            "requires_action": "true or false. assign true if the news requires action else false",
             "summary": "Brief summary of the risk impact for dashboard display",
-            "description": "Detailed justification explaining risk categorization and assessment rationale",
+            "description": "Detailed justification explaining sentiment, confidence, impact, affected markets, is_market_moving, is_breaking_news, requires_action, historical_impact_analysis",
             "historical_impact_analysis": "Analysis of how similar events in the past have affected international banks, including specific examples and lessons learned"
         }}
         
@@ -161,6 +161,7 @@ class RiskAnalysisEvaluatorOptimizer:
         4. Proper confidence scoring based on available information
         5. Correct identification of market-moving events and action requirements
         6. Quality of supporting reasoning and justification
+        7. Detailed justification explaining sentiment, confidence, impact, affected markets, is_market_moving, is_breaking_news, requires_action, historical_impact_analysis
         
         You should be thorough but fair. Only pass analyses that meet professional standards.
         Output your evaluation in the specified format."""
@@ -207,7 +208,7 @@ class RiskAnalysisEvaluatorOptimizer:
         ]
         
         # Use util.py for LLM call
-        content = llm_call(messages, model="gpt-4o", temperature=0.1)
+        content = llm_call(messages, model="gpt-4.1", temperature=0.1)
         
         # Extract evaluation and feedback using util.py
         evaluation = extract_xml(content, "evaluation")
@@ -331,11 +332,12 @@ def process_news_with_evaluator_optimizer(news_data: Dict, max_iterations: int =
     # Define the analysis task
     task_description = """
     Analyze banking/financial news for comprehensive risk assessment including:
-    - Accurate risk categorization and severity assessment
+    - Accurate risk categorization and severity assessment and sentiment analysis with justification
     - Realistic financial exposure estimates
     - Proper confidence scoring based on information quality  
     - Correct identification of market-moving events
     - Appropriate action requirements for risk management
+    - Historical impact analysis
     """
     
     # Run the optimization process - let exceptions bubble up to Huey

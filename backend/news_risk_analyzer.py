@@ -59,7 +59,7 @@ class Config:
     CONNECTION_TIMEOUT = int(os.getenv('CONNECTION_TIMEOUT', '30'))
     
     # Evaluator-Optimizer Configuration
-    MAX_OPTIMIZATION_ITERATIONS = int(os.getenv('MAX_OPTIMIZATION_ITERATIONS', '2'))
+    MAX_OPTIMIZATION_ITERATIONS = int(os.getenv('MAX_OPTIMIZATION_ITERATIONS', '3'))
     
     @classmethod
     def validate(cls):

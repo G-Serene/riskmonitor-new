@@ -8,7 +8,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertCircle, BarChart3, FileText, Sparkles, Clock, Download, Eye, Globe, TrendingUp, Target } from "lucide-react"
+import { AlertCircle, BarChart3, FileText, Sparkles, Clock, Download, Eye, Globe, TrendingUp, Target, DollarSign, Truck, CreditCard, Building, LineChart, Settings, Shield, Zap, Package, AlertTriangle, TrendingDown, Droplets, Landmark, TreePine } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { apiClient, ThemeStatistics, ThemeStatisticsResponse, ThemeArticlesResponse, StorylineResponse, RecentStorylinesResponse } from "@/lib/api-client"
 import { formatRelativeTime } from "@/lib/time-utils"
 import { useToast } from "@/hooks/use-toast"
@@ -308,6 +309,31 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
     return colors[index % colors.length]
   }
 
+  const getThemeIcon = (themeName: string) => {
+    // Map actual theme names from backend to appropriate icons
+    const themeIconMap: { [key: string]: any } = {
+      'Credit Crisis': CreditCard,
+      'Market Volatility Surge': TrendingDown,
+      'Currency Crisis': DollarSign,
+      'Interest Rate Shock': TrendingUp,
+      'Geopolitical Crisis': AlertTriangle,
+      'Trade War Escalation': Truck,
+      'Regulatory Crackdown': Shield,
+      'Cyber Security Breach': Zap,
+      'Liquidity Shortage': Droplets,
+      'Operational Disruption': Settings,
+      'Real Estate Crisis': Building,
+      'Inflation Crisis': TrendingUp,
+      'Sovereign Debt Crisis': Landmark,
+      'Supply Chain Crisis': Truck,
+      'ESG & Climate Risk': TreePine,
+      'Systemic Banking Crisis': AlertTriangle,
+      'Other Financial Risks': AlertTriangle
+    };
+    
+    return themeIconMap[themeName] || TrendingUp;
+  }
+
   if (loading) {
     return (
       <div className={`space-y-4 ${className}`}>
@@ -358,106 +384,118 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
             Last 10 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex-1 overflow-hidden p-6">
-          <div className="news-feed-scroll">
-            <div className="space-y-3">
+        <CardContent className="space-y-4 p-6">
             {themeStats.length > 0 ? (
-              themeStats.map((theme, index) => {
-                const existingStoryline = existingStorylines?.storylines.find(s => s.theme_id === theme.theme_id)
-                const isGenerating = generatingStoryline && generatingThemeId === theme.theme_id
-                
-                return (
-                  <div key={theme.theme_id} className="space-y-2 p-3 border rounded-lg hover:bg-gray-50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-muted-foreground">
-                        {theme.theme_name}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <Badge className={getRiskScoreColor(theme.avg_risk_score)}>
-                          Avg Risk: {theme.avg_risk_score.toFixed(1)}
-                        </Badge>
-                        <span className="text-sm text-muted-foreground">
-                          {theme.article_count} articles
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* Theme bar */}
-                    <div className="relative">
-                      <div className="h-4 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${getThemeColor(index)} transition-all`}
-                          style={{
-                            width: `${Math.max(5, (theme.article_count / Math.max(...themeStats.map(t => t.article_count))) * 100)}%`
-                          }}
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Action buttons and storyline info */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => handleGenerateStoryline(theme.theme_id, true)} // Force regenerate
-                          disabled={generatingStoryline}
-                          className="gap-1 h-7 px-2 text-xs relative overflow-hidden"
-                        >
-                          {isGenerating ? (
-                            <>
-                              <div className="absolute inset-0 bg-blue-600 transition-all duration-300" 
-                                   style={{ width: `${generationProgress}%` }} />
-                              <div className="relative z-10 flex items-center gap-1">
-                                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
-                                <span className="text-[10px]">
-                                  {generationProgress < 100 ? `${Math.round(generationProgress)}%` : 'Completing...'}
-                                </span>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="h-3 w-3" />
-                              Generate
-                            </>
-                          )}
-                        </Button>
-                        
-                        {existingStoryline && (
+              <TooltipProvider>
+                {themeStats.map((theme, index) => {
+                  const existingStoryline = existingStorylines?.storylines.find(s => s.theme_id === theme.theme_id)
+                  const isGenerating = generatingStoryline && generatingThemeId === theme.theme_id
+                  
+                  return (
+                    <div key={theme.theme_id} className="group p-4 rounded-xl border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200">
+                      <div className="flex items-center gap-4">
+                        {/* Icon and Theme Name */}
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="p-2 bg-gray-50 rounded-lg group-hover:bg-gray-100 transition-colors">
+                            {(() => {
+                              const IconComponent = getThemeIcon(theme.theme_name)
+                              return <IconComponent className="h-5 w-5 text-gray-600" />
+                            })()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium text-gray-900 truncate">{theme.theme_name}</h3>
+                              <Badge variant="secondary" className={`px-3 py-1 font-semibold ${getRiskScoreColor(theme.avg_risk_score)}`}>
+                                Avg. risk: {theme.avg_risk_score.toFixed(1)}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {existingStoryline ? (
+                                <>Analysis: {formatRelativeTime(
+                                  Math.floor((new Date().getTime() - new Date(existingStoryline.generated_at).getTime()) / (1000 * 60))
+                                )} ago</>
+                              ) : (
+                                <>Analysis not generated</>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                                                  {/* Clean Bar Chart with Count */}
+                        <div className="flex items-center gap-4 flex-1">
+                          {/* Bar Chart */}
+                          <div className="flex-1 max-w-xs">
+                            <div className="w-full bg-gray-100 rounded-full h-4">
+                              <div
+                                className={`h-4 rounded-full ${getThemeColor(index)} transition-all duration-300`}
+                                style={{
+                                  width: `${(theme.article_count / Math.max(...themeStats.map(t => t.article_count))) * 100}%`,
+                                  minWidth: theme.article_count > 0 ? "20%" : "0%",
+                                }}
+                              />
+                            </div>
+                          </div>
+                          
+                          {/* Article Label */}
+                          <div className="text-xs text-gray-600 font-medium min-w-fit">
+                            {theme.article_count} article{theme.article_count !== 1 ? 's' : ''}
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-2">
                           <Button
-                            size="sm"
                             variant="outline"
+                            size="sm"
+                            className="h-8 px-3 text-xs font-medium hover:bg-blue-50 hover:border-blue-200 bg-transparent"
                             onClick={() => {
-                              // Use existing storyline without regeneration
-                              setSelectedTheme(theme.theme_id)
-                              handleGenerateStoryline(theme.theme_id, false) // Don't force regenerate
+                              setSelectedTheme(null)
+                              setThemeArticles(null)
+                              handleGenerateStoryline(theme.theme_id, true)
                             }}
-                            className="gap-1 h-7 px-2 text-xs"
+                            disabled={generatingStoryline}
+                            title="Generate fresh impact assessment"
                           >
-                            <Eye className="h-3 w-3" />
+                            {isGenerating ? (
+                              <>
+                                <div className="animate-spin rounded-full h-3 w-3 border-b border-blue-600 mr-1"></div>
+                                <span>{Math.round(generationProgress)}%</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-3 w-3 mr-1" />
+                                Generate IA
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 text-xs font-medium hover:bg-gray-50 bg-transparent"
+                            onClick={() => {
+                              setSelectedTheme(theme.theme_id)
+                              if (existingStoryline) {
+                                handleGenerateStoryline(theme.theme_id, false)
+                              } else {
+                                handleThemeClick(theme.theme_id)
+                              }
+                            }}
+                            title="View existing assessment"
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
                             View
                           </Button>
-                        )}
-                      </div>
-                      
-                      {/* Storyline timestamp info */}
-                      {existingStoryline && (
-                        <div className="text-xs text-muted-foreground">
-                          Generated {formatRelativeTime(
-                            Math.floor((new Date().getTime() - new Date(existingStoryline.generated_at).getTime()) / (1000 * 60))
-                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                )
-              })
+                  )
+                })}
+              </TooltipProvider>
             ) : (
               <div className="text-center text-muted-foreground py-8">
                 <p>No theme data available</p>
               </div>
             )}
-          </div>
-          </div>
         </CardContent>
       </Card>
 

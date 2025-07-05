@@ -23,30 +23,28 @@ Endpoints:
 - GET /api/stream/risk - SSE stream for real-time risk updates
 """
 
+import hashlib
+import json
+import os
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+from contextlib import contextmanager
+import sqlite3
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
-import sqlite3
-import json
-import asyncio
-import os
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from contextlib import contextmanager
 from dotenv import load_dotenv
-
-# Import the new flexible SSE event system
 from sse_event_system import (
-    SSEEventManager,
-    emit_news_update,
-    emit_news_feed_update,
-    emit_risk_score_update,
-    emit_dashboard_summary_update,
-    emit_risk_breakdown_update,
-    emit_alerts_update,
-    emit_connection_event,
-    emit_error_event
+    SSEEventManager, 
+    emit_connection_event, 
+    emit_error_event, 
+    emit_news_feed_update, 
+    emit_dashboard_summary_update, 
+    emit_risk_breakdown_update, 
+    emit_alerts_update, 
+    emit_risk_score_update
 )
 
 # Load environment variables
@@ -61,6 +59,36 @@ app = FastAPI(
     description="REST API for Banking Risk Dashboard with SSE streaming",
     version="1.0.0"
 )
+
+# Global change detection cache
+_change_detection_cache = {
+    'dashboard_summary': None,
+    'risk_breakdown': None, 
+    'news_feed': None,
+    'alerts': None
+}
+
+def get_data_hash(data: Any) -> str:
+    """Generate hash for change detection"""
+    if isinstance(data, dict):
+        # Remove timestamp fields for hash calculation
+        filtered_data = {k: v for k, v in data.items() if k not in ['timestamp', 'last_check', 'triggered_by_event']}
+        return hashlib.md5(json.dumps(filtered_data, sort_keys=True).encode()).hexdigest()
+    elif isinstance(data, list):
+        # For lists, sort and hash
+        return hashlib.md5(json.dumps(sorted(data, key=str), sort_keys=True).encode()).hexdigest()
+    else:
+        return hashlib.md5(str(data).encode()).hexdigest()
+
+def should_emit_update(update_type: str, data: Any) -> bool:
+    """Check if update should be emitted based on change detection"""
+    current_hash = get_data_hash(data)
+    last_hash = _change_detection_cache.get(update_type)
+    
+    if current_hash != last_hash:
+        _change_detection_cache[update_type] = current_hash
+        return True
+    return False
 
 # CORS middleware for frontend
 app.add_middleware(
@@ -200,9 +228,9 @@ def time_window_to_datetime_clause(time_window: str = "today", from_date: str = 
     
     # Handle special cases first
     if time_window == "today":
-        return f"published_date >= datetime('now', 'start of day')"
+        return f"published_date >= datetime((SELECT MAX(published_date) FROM news_articles WHERE status != 'Archived'), 'start of day')"
     elif time_window == "yesterday":
-        return f"published_date >= datetime('now', '-1 day', 'start of day') AND published_date < datetime('now', 'start of day')"
+        return f"published_date >= datetime((SELECT MAX(published_date) FROM news_articles WHERE status != 'Archived'), '-1 day', 'start of day') AND published_date < datetime((SELECT MAX(published_date) FROM news_articles WHERE status != 'Archived'), 'start of day')"
     
     # Map time windows to SQLite modifiers
     window_map = {
@@ -219,7 +247,7 @@ def time_window_to_datetime_clause(time_window: str = "today", from_date: str = 
     }
     
     modifier = window_map.get(time_window, "'-1 day'")  # Default to today
-    return f"published_date >= datetime('now', {modifier})"
+    return f"published_date >= datetime((SELECT MAX(published_date) FROM news_articles WHERE status != 'Archived'), {modifier})"
 
 def get_time_window_description(time_window: str = "today", from_date: str = None, to_date: str = None) -> str:
     """Get human readable description of time window"""
@@ -505,7 +533,11 @@ async def get_dashboard_summary(
                     COUNT(*) as frequency,
                     AVG(CASE WHEN impact_score IS NOT NULL THEN impact_score ELSE 75.0 END) as avg_impact_score,
                     MAX(published_date) as latest_mention,
-                    COUNT(CASE WHEN published_date >= datetime('now', '-6 hours') THEN 1 END) as recent_mentions,
+                    COUNT(CASE WHEN published_date >= (
+                        SELECT datetime(MAX(published_date), '-10 days') 
+                        FROM news_articles 
+                        WHERE status != 'Archived'
+                    ) THEN 1 END) as recent_mentions,
                     AVG(CASE
                         WHEN severity_level = 'Critical' THEN 4.0
                         WHEN severity_level = 'High' THEN 3.0
@@ -519,10 +551,11 @@ async def get_dashboard_summary(
                   AND keywords IS NOT NULL
                   AND json_valid(keywords) = 1
                   AND keywords.value IS NOT NULL
+                  AND LENGTH(TRIM(keywords.value)) > 2
                 GROUP BY LOWER(keywords.value)
                 HAVING frequency >= 1
                 ORDER BY frequency DESC, recent_mentions DESC
-                LIMIT 10
+                LIMIT 15
             """
             trending_topics = conn.execute(trending_query).fetchall()
             
@@ -1234,8 +1267,8 @@ async def stream_dashboard_updates():
                 })
                 yield f"event: error\ndata: {error_data}\n\n"
             
-            # Wait 3 seconds before next check (faster than before)
-            await asyncio.sleep(3)
+            # Wait 10 seconds before next check (good demo pace)
+            await asyncio.sleep(10)
     
     async def handle_cascading_updates(original_event_type: str, event_data: Dict, trigger_event_id: int):
         """Handle cascading updates based on original event type"""
@@ -1285,11 +1318,13 @@ async def stream_dashboard_updates():
                                 "minutes_ago": 0
                             })
                     
-                    # Emit news feed update
-                    emit_news_feed_update(
-                        articles=news_data,
-                        triggered_by_event=trigger_event_id
-                    )
+                    # Emit news feed update only if data changed
+                    if should_emit_update('news_feed', news_data):
+                        emit_news_feed_update(
+                            articles=news_data,
+                            triggered_by_event=trigger_event_id
+                        )
+                        print(f"📰 News feed updated: {len(news_data)} articles (content changed)")
                     
                     # Cascade 2: Update dashboard summary (use dynamic calculation for 24h window)
                     try:
@@ -1309,16 +1344,19 @@ async def stream_dashboard_updates():
                         """).fetchone()
                         
                         if dashboard_counts:
-                            emit_dashboard_summary_update(
-                                total_news_filtered=dashboard_counts["total_news_today"] or 0,
-                                critical_count=dashboard_counts["critical_count"] or 0,
-                                high_count=dashboard_counts["high_count"] or 0,
-                                medium_count=dashboard_counts["medium_count"] or 0,
-                                low_count=dashboard_counts["low_count"] or 0,
-                                avg_sentiment=dashboard_counts["avg_sentiment"] or 0.0,
-                                current_risk_score=dashboard_counts["current_risk_score"] or 0.0
-                            )
-                            print(f"📊 Dashboard summary updated: {dashboard_counts['total_news_today']} articles, {dashboard_counts['medium_count']} medium")
+                            dashboard_data = {
+                                "total_news_filtered": dashboard_counts["total_news_today"] or 0,
+                                "critical_count": dashboard_counts["critical_count"] or 0,
+                                "high_count": dashboard_counts["high_count"] or 0,
+                                "medium_count": dashboard_counts["medium_count"] or 0,
+                                "low_count": dashboard_counts["low_count"] or 0,
+                                "avg_sentiment": dashboard_counts["avg_sentiment"] or 0.0,
+                                "current_risk_score": dashboard_counts["current_risk_score"] or 0.0
+                            }
+                            
+                            if should_emit_update('dashboard_summary', dashboard_data):
+                                emit_dashboard_summary_update(**dashboard_data)
+                                print(f"📊 Dashboard summary updated: {dashboard_counts['total_news_today']} articles, {dashboard_counts['medium_count']} medium (content changed)")
                         
                     except Exception as summary_error:
                         print(f"⚠️ Error calculating dashboard summary: {summary_error}")
@@ -1361,8 +1399,9 @@ async def stream_dashboard_updates():
                             })
                         
                         if breakdown_data:  # Only emit if we have valid data
-                            emit_risk_breakdown_update(breakdown=breakdown_data)
-                            print(f"📊 Risk breakdown updated: {len(breakdown_data)} categories")
+                            if should_emit_update('risk_breakdown', breakdown_data):
+                                emit_risk_breakdown_update(breakdown=breakdown_data)
+                                print(f"📊 Risk breakdown updated: {len(breakdown_data)} categories (content changed)")
                             
                     except Exception as breakdown_error:
                         print(f"⚠️ Error calculating risk breakdown: {breakdown_error}")
@@ -1409,17 +1448,21 @@ async def stream_dashboard_updates():
                     should_emit_alert = True
                     print(f"🔔 Critical count changed: {last_alert_state['critical_count']} → {current_critical_count}")
                 
-                # Or if it's been more than 5 minutes since last emission
+                # Or if it's been more than 2 minutes since last emission
                 elif (last_alert_state['last_emitted'] is None or 
-                      (current_time - last_alert_state['last_emitted']).total_seconds() > 300):
+                      (current_time - last_alert_state['last_emitted']).total_seconds() > 120):
                     should_emit_alert = True
-                    print(f"⏰ Alert update due to time interval (5 minutes)")
+                    print(f"⏰ Alert update due to time interval (2 minutes)")
                 
                 if should_emit_alert:
-                    emit_alerts_update(
-                        critical_count=current_critical_count,
-                        last_check=current_time.isoformat()
-                    )
+                    alert_data = {
+                        "critical_count": current_critical_count,
+                        "last_check": current_time.isoformat()
+                    }
+                    
+                    if should_emit_update('alerts', alert_data):
+                        emit_alerts_update(**alert_data)
+                        print(f"🔔 Alerts updated: {current_critical_count} critical (content changed)")
                     
                     # Update tracking state
                     last_alert_state['critical_count'] = current_critical_count

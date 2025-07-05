@@ -1,16 +1,19 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
 import { NewsArticle } from "@/lib/api-client"
-import { TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { TrendingUp, TrendingDown, Minus, Calendar, Clock } from "lucide-react"
 
 interface RiskTrendsMiniProps {
   newsData: NewsArticle[]
   timeWindowDescription?: string
   currentRiskScore?: number
 }
+
+type TrendPeriod = 'day' | 'week' | 'month'
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -35,35 +38,70 @@ export function RiskTrendsMini({
   timeWindowDescription,
   currentRiskScore = 0
 }: RiskTrendsMiniProps) {
+  const [selectedPeriod, setSelectedPeriod] = useState<TrendPeriod>('day')
+
   const { chartData, trend, trendPercentage } = useMemo(() => {
     if (!newsData || newsData.length === 0) {
       return { chartData: [], trend: 'stable', trendPercentage: 0 }
     }
 
-    // Group articles by time periods (last 24 hours in 4-hour chunks)
     const now = new Date()
     const timeSlots = []
     
-    // Create 6 time slots for the last 24 hours (4-hour intervals)
-    for (let i = 5; i >= 0; i--) {
-      const slotEnd = new Date(now.getTime() - (i * 4 * 60 * 60 * 1000))
-      const slotStart = new Date(slotEnd.getTime() - (4 * 60 * 60 * 1000))
+    // Configure time periods based on selected filter
+    let numSlots: number
+    let intervalMs: number
+    let formatLabel: (date: Date) => string
+    
+    switch (selectedPeriod) {
+      case 'day':
+        // Last 10 days
+        numSlots = 10
+        intervalMs = 24 * 60 * 60 * 1000 // 1 day
+        formatLabel = (date: Date) => {
+          const today = new Date()
+          const diffDays = Math.floor((today.getTime() - date.getTime()) / (24 * 60 * 60 * 1000))
+          return diffDays === 0 ? 'Today' : diffDays === 1 ? '1d ago' : `${diffDays}d ago`
+        }
+        break
+      case 'week':
+        // Last 8 weeks
+        numSlots = 8
+        intervalMs = 7 * 24 * 60 * 60 * 1000 // 1 week
+        formatLabel = (date: Date) => {
+          const weekStart = new Date(date)
+          weekStart.setDate(weekStart.getDate() - weekStart.getDay()) // Start of week
+          return `${weekStart.getMonth() + 1}/${weekStart.getDate()}`
+        }
+        break
+      case 'month':
+        // Last 6 months
+        numSlots = 6
+        intervalMs = 30 * 24 * 60 * 60 * 1000 // ~1 month
+        formatLabel = (date: Date) => {
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+          return monthNames[date.getMonth()]
+        }
+        break
+    }
+    
+    // Create time slots
+    for (let i = numSlots - 1; i >= 0; i--) {
+      const slotEnd = new Date(now.getTime() - (i * intervalMs))
+      const slotStart = new Date(slotEnd.getTime() - intervalMs)
       
-             const articlesInSlot = newsData.filter(article => {
-         if (article.minutes_ago === undefined) return false
-         const articleTime = new Date(now.getTime() - (article.minutes_ago * 60 * 1000))
-         return articleTime >= slotStart && articleTime < slotEnd
-       })
+      const articlesInSlot = newsData.filter(article => {
+        if (article.minutes_ago === undefined) return false
+        const articleTime = new Date(now.getTime() - (article.minutes_ago * 60 * 1000))
+        return articleTime >= slotStart && articleTime < slotEnd
+      })
 
       const avgRiskScore = articlesInSlot.length > 0
         ? articlesInSlot.reduce((sum, article) => sum + article.overall_risk_score, 0) / articlesInSlot.length
         : 0
 
-      // Format time label
-      const timeLabel = slotEnd.getHours().toString().padStart(2, '0') + ':00'
-      
       timeSlots.push({
-        time: timeLabel,
+        time: formatLabel(slotEnd),
         riskScore: avgRiskScore,
         articleCount: articlesInSlot.length,
         timestamp: slotEnd.getTime()
@@ -95,7 +133,7 @@ export function RiskTrendsMini({
       trend: trendDirection,
       trendPercentage: Math.abs(trendPercent)
     }
-  }, [newsData])
+  }, [newsData, selectedPeriod])
 
   const getTrendIcon = () => {
     switch (trend) {
@@ -130,14 +168,55 @@ export function RiskTrendsMini({
     }
   }
 
+  const getPeriodDescription = () => {
+    switch (selectedPeriod) {
+      case 'day':
+        return 'Last 10 days'
+      case 'week':
+        return 'Last 8 weeks'
+      case 'month':
+        return 'Last 6 months'
+    }
+  }
+
   if (!newsData || newsData.length === 0) {
     return (
       <Card className="h-full">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Risk Trends</CardTitle>
-          <CardDescription className="text-xs">
-            24-hour risk evolution ({timeWindowDescription || "last 24 hours"})
-          </CardDescription>
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <CardTitle className="text-base">Risk Trends</CardTitle>
+              <CardDescription className="text-xs">
+                {getPeriodDescription()} evolution
+              </CardDescription>
+            </div>
+            <div className="flex gap-1">
+              <Button 
+                variant={selectedPeriod === 'day' ? 'default' : 'outline'} 
+                size="sm" 
+                onClick={() => setSelectedPeriod('day')}
+                className="h-6 px-2 text-xs"
+              >
+                Days
+              </Button>
+              <Button 
+                variant={selectedPeriod === 'week' ? 'default' : 'outline'} 
+                size="sm" 
+                onClick={() => setSelectedPeriod('week')}
+                className="h-6 px-2 text-xs"
+              >
+                Weeks
+              </Button>
+              <Button 
+                variant={selectedPeriod === 'month' ? 'default' : 'outline'} 
+                size="sm" 
+                onClick={() => setSelectedPeriod('month')}
+                className="h-6 px-2 text-xs"
+              >
+                Months
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="flex items-center justify-center h-[120px]">
           <div className="text-center text-muted-foreground">
@@ -156,13 +235,41 @@ export function RiskTrendsMini({
   return (
     <Card className="h-full">
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-2">
           <div>
             <CardTitle className="text-base">Risk Trends</CardTitle>
             <CardDescription className="text-xs">
-              24-hour evolution ({timeWindowDescription || "last 24 hours"})
+              {getPeriodDescription()} evolution
             </CardDescription>
           </div>
+          <div className="flex gap-1">
+            <Button 
+              variant={selectedPeriod === 'day' ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => setSelectedPeriod('day')}
+              className="h-6 px-2 text-xs"
+            >
+              Days
+            </Button>
+            <Button 
+              variant={selectedPeriod === 'week' ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => setSelectedPeriod('week')}
+              className="h-6 px-2 text-xs"
+            >
+              Weeks
+            </Button>
+            <Button 
+              variant={selectedPeriod === 'month' ? 'default' : 'outline'} 
+              size="sm" 
+              onClick={() => setSelectedPeriod('month')}
+              className="h-6 px-2 text-xs"
+            >
+              Months
+            </Button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-1">
             {getTrendIcon()}
             <span className={`text-xs font-medium ${getTrendColor()}`}>

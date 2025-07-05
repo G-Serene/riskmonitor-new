@@ -20,7 +20,6 @@ def get_recent_scoring_context(limit=50):
                        confidence_score, primary_risk_category, is_market_moving,
                        published_date
                 FROM news_articles 
-                WHERE published_date >= datetime('now', '-7 days')
                 ORDER BY published_date DESC
                 LIMIT ?
             """, [limit])

@@ -1037,7 +1037,11 @@ def dev_reset_all_tables():
                     COUNT(*) as frequency,
                     AVG(CASE WHEN impact_score IS NOT NULL THEN impact_score ELSE 75.0 END) as avg_impact_score,
                     MAX(published_date) as latest_mention,
-                    COUNT(CASE WHEN published_date >= datetime('now', '-6 hours') THEN 1 END) as recent_mentions,
+                    COUNT(CASE WHEN published_date >= (
+                        SELECT datetime(MAX(published_date), '-10 days') 
+                        FROM news_articles 
+                        WHERE status != 'Archived'
+                    ) THEN 1 END) as recent_mentions,
                     AVG(CASE 
                         WHEN severity_level = 'Critical' THEN 4.0
                         WHEN severity_level = 'High' THEN 3.0  

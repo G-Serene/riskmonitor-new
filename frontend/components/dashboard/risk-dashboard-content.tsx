@@ -52,6 +52,7 @@ import { ThemeAnalytics } from "@/components/dashboard/theme-analytics"
 import { TimeWindowSelector } from "@/components/dashboard/time-window-selector"
 import { CriticalAlerts } from "@/components/dashboard/critical-alerts"
 import { LiveUpdatesNotification } from "@/components/dashboard/live-updates-notification"
+import { TrendingTopicsWordCloud } from "@/components/dashboard/trending-topics-wordcloud"
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { useDashboardSSE } from "@/hooks/use-dashboard-sse"
 import { apiClient } from "@/lib/api-client"
@@ -850,6 +851,13 @@ export default function RiskDashboardContent() {
               <InteractiveRiskBreakdown 
                 newsData={filteredNewsData}
                 timeWindowDescription={dashboardData.time_window_description}
+              />
+            </div>
+
+            {/* Trending Topics Word Cloud */}
+            <div className="h-64">
+              <TrendingTopicsWordCloud 
+                data={dashboardData.trending_topics || []}
               />
             </div>
 

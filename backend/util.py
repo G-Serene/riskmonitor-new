@@ -68,11 +68,11 @@ def get_model_name() -> str:
     
     if provider == 'azure':
         # For Azure, use the deployment name
-        deployment_name = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o')
+        deployment_name = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4.1')
         return deployment_name
     else:
         # For OpenAI, use the model name directly
-        model_name = os.getenv('LLM_MODEL', 'gpt-4o')
+        model_name = os.getenv('LLM_MODEL', 'gpt-4.1')
         return model_name
 
 

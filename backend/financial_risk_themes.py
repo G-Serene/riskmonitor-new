@@ -277,7 +277,6 @@ Choose the theme that BEST matches the primary financial risk in this news. If n
         # Call LLM for classification
         response = llm_call(
             messages=[{"role": "user", "content": prompt}],
-            model="gpt-4o-mini",
             temperature=0.1
         )
         

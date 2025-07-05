@@ -40,10 +40,10 @@ class Config:
     AZURE_OPENAI_API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
     AZURE_OPENAI_ENDPOINT = os.getenv('AZURE_OPENAI_ENDPOINT')
     AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION', '2024-02-15-preview')
-    AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o')
+    AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4.1')
     
     # Model Configuration
-    LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4o')
+    LLM_MODEL = os.getenv('LLM_MODEL', 'gpt-4.1')
     
     # Database Configuration
     RISK_DB = os.getenv('RISK_DB', 'risk_dashboard.db')
@@ -180,59 +180,6 @@ huey = SqliteHuey(name='news_risk_analyzer', filename='news_processing_queue.db'
 # CONSUMER: Background task processing
 # ==========================================
 
-def should_process_news(news_data):
-    """
-    Pre-filter function to quickly determine if news poses any financial risk.
-    Returns True if news should be processed, False if it should be skipped.
-    """
-    try:
-        # Simple prompt to quickly assess financial risk
-        prompt = f"""
-You are a financial risk pre-filter. Your job is to quickly determine if news poses ANY financial risk to banks, markets, or financial institutions.
-
-ONLY return "PROCESS" if the news could pose financial risks such as:
-- Market crashes, volatility, or disruptions
-- Economic downturns, recessions, or financial crises
-- Regulatory changes that could harm banks
-- Company failures, bankruptcies, or major losses
-- Geopolitical events affecting markets
-- Cyber attacks on financial systems
-- Interest rate shocks or monetary policy risks
-- Credit defaults or liquidity problems
-
-Return "SKIP" if the news is:
-- Positive developments (tech breakthroughs, good earnings, etc.)
-- Neutral announcements
-- General news without financial impact
-- Sports, entertainment, or lifestyle content
-
-News to analyze:
-Headline: {news_data['headline']}
-Content: {news_data['story'][:500]}...
-
-Respond with exactly one word: PROCESS or SKIP
-        """
-        
-        # Use the existing llm_call function from util.py
-        response_content = llm_call([{"role": "user", "content": prompt}], temperature=0.1)
-        
-        decision = response_content.strip().upper()
-        
-        if decision == "PROCESS":
-            print(f"🎯 Risk pre-filter: PROCESS - Financial risk detected")
-            return True
-        elif decision == "SKIP":
-            print(f"⏭️ Risk pre-filter: SKIP - No financial risk detected")
-            return False
-        else:
-            # If unclear response, err on the side of processing
-            print(f"⚠️ Risk pre-filter: Unclear response '{decision}' - defaulting to PROCESS")
-            return True
-            
-    except Exception as e:
-        print(f"⚠️ Risk pre-filter error: {e} - defaulting to PROCESS")
-        # If error, process the news to be safe
-        return True
 
 @huey.task(retries=Config.MAX_RETRIES, retry_delay=Config.RETRY_DELAY)
 def process_news_article(news_data):
@@ -258,6 +205,7 @@ def process_news_article(news_data):
     
     try:
         # Skip pre-filtering - do full analysis first to get accurate sentiment/risk assessment
+        # This avoids costly double LLM calls and relies on post-analysis sentiment filtering
         
         # ==========================================
         # STEP 1: Risk Analysis using Evaluator-Optimizer Pattern
@@ -1256,7 +1204,7 @@ def dev_system_status():
         
         # LLM Configuration status
         llm_provider = os.getenv('LLM_PROVIDER', 'openai').lower()
-        llm_model = os.getenv('LLM_MODEL', 'gpt-4o')
+        llm_model = os.getenv('LLM_MODEL', 'gpt-4.1')
         
         print(f"🤖 LLM CONFIGURATION:")
         print(f"   Provider: {llm_provider.upper()}")

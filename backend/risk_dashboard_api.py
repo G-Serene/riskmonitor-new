@@ -1055,7 +1055,6 @@ async def generate_theme_storyline(
             
             storyline_response = llm_call(
                 messages=[{"role": "user", "content": storyline_prompt}],
-                model="gpt-4o-mini",
                 temperature=0.1
             )
             

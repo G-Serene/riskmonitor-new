@@ -9,6 +9,41 @@ from datetime import datetime
 from util import llm_call, extract_xml, parse_json_from_xml, validate_risk_analysis
 
 
+def get_recent_scoring_context(limit=50):
+    """Get recent articles with scores for relative comparison"""
+    from news_risk_analyzer import get_risk_db_connection
+    
+    try:
+        with get_risk_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT summary, severity_level, sentiment_score, impact_score, 
+                       confidence_score, primary_risk_category, is_market_moving,
+                       published_date
+                FROM news_articles 
+                WHERE published_date >= datetime('now', '-7 days')
+                ORDER BY published_date DESC
+                LIMIT ?
+            """, [limit])
+            
+            articles = cursor.fetchall()
+            if not articles:
+                return "No recent articles for comparison."
+            
+            context_lines = ["RECENT ARTICLES FOR RELATIVE SCORING COMPARISON:"]
+            for i, art in enumerate(articles, 1):
+                market_moving = "Market-Moving" if art['is_market_moving'] else "Non-Market-Moving"
+                context_lines.append(
+                    f"{i}. {art['summary'][:80]}... "
+                    f"[{art['severity_level']} | Sentiment: {art['sentiment_score']:.2f} | "
+                    f"Impact: {art['impact_score']} | Confidence: {art['confidence_score']}% | "
+                    f"{art['primary_risk_category']} | {market_moving} | {art['published_date'][:10]}]"
+                )
+            
+            return "\n".join(context_lines)
+    except Exception as e:
+        return f"Context unavailable: {e}"
+
+
 class RiskAnalysisEvaluatorOptimizer:
     """
     Evaluator-Optimizer workflow following the Anthropic cookbook pattern.
@@ -51,14 +86,24 @@ class RiskAnalysisEvaluatorOptimizer:
         {Valid JSON with risk analysis as specified in the user prompt}
         </response>"""
         
-        user_prompt = f"""
-        Analyze this banking news for comprehensive risk impact INCLUDING HISTORICAL CONTEXT:
+        # Get recent scoring context for relative comparison
+        scoring_context = get_recent_scoring_context(limit=50)
         
+        user_prompt = f"""
+        {scoring_context}
+        
+        CURRENT NEWS TO ANALYZE:
         Headline: {news_data['headline']}
         Content: {news_data['story'][:2000]}
         Source: {news_data['newsSource']}
         
-        IMPORTANT: For the historical_impact_analysis field, research and analyze similar past events and their specific impacts on international banks. Include concrete examples, dates, and outcomes when possible.
+        IMPORTANT: 
+        1. For the historical_impact_analysis field, research and analyze similar past events and their specific impacts on international banks. Include concrete examples, dates, and outcomes when possible.
+        2. Score the current news RELATIVE to the recent articles above. Consider:
+           - Is this more/less severe than similar recent events?
+           - How does the impact compare to recent market-moving events?
+           - What's the appropriate sentiment relative to recent negative news?
+           - Use the recent articles as your baseline for scoring consistency.
         
         {feedback_context}
         
@@ -92,6 +137,7 @@ class RiskAnalysisEvaluatorOptimizer:
         }}
         
         CRITICAL REQUIREMENTS:
+        - RELATIVE SCORING: Use the recent articles context above as your baseline for consistent scoring
         - primary_risk_category: Select ONLY ONE primary category that represents the main risk
         - secondary_risk_categories: Include ALL other relevant risk categories that also apply (can be empty array)
         - For comprehensive risk monitoring, identify ALL relevant risk categories, not just the most obvious one
@@ -101,7 +147,7 @@ class RiskAnalysisEvaluatorOptimizer:
         - coordinates: lat/lng for PRIMARY affected country
         - keywords: 5-10 key financial terms (lowercase)
         - entities: 3-8 key people/organizations
-        - is_market_moving: TRUE only for significant market impact events
+        - is_market_moving: TRUE only for significant market impact events (compare to recent market-moving events above)
         - requires_action: TRUE only for immediate risk management needs
         - description: 2-3 sentences explaining your reasoning for key decisions
         - historical_impact_analysis: 3-4 sentences analyzing how similar events in the past have specifically affected international banks. Include concrete examples like "During the 2008 financial crisis, similar mortgage-related news led to X% losses at major banks like..." or "When central banks previously raised rates in similar circumstances, banks experienced..." Focus on actionable historical insights.
@@ -113,7 +159,7 @@ class RiskAnalysisEvaluatorOptimizer:
         ]
         
         # Use util.py for LLM call
-        content = llm_call(messages, model="gpt-4o", temperature=0.1)
+        content = llm_call(messages, temperature=0.1)
         
         # Extract thoughts and response using util.py
         thoughts = extract_xml(content, "thoughts")
@@ -208,7 +254,7 @@ class RiskAnalysisEvaluatorOptimizer:
         ]
         
         # Use util.py for LLM call
-        content = llm_call(messages, model="gpt-4.1", temperature=0.1)
+        content = llm_call(messages, temperature=0.1)
         
         # Extract evaluation and feedback using util.py
         evaluation = extract_xml(content, "evaluation")

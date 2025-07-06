@@ -19,5 +19,7 @@ if __name__ == "__main__":
         host="127.0.0.1", 
         port=8000, 
         reload=True,
-        log_level="info"
+        log_level="debug",  # Changed from "info" to "debug"
+        access_log=True,    # Enable access logging
+        use_colors=True     # Enable colored output
     )

@@ -27,13 +27,14 @@ import hashlib
 import json
 import os
 import asyncio
+import traceback
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from contextlib import contextmanager
 import sqlite3
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 from dotenv import load_dotenv
 from sse_event_system import (
@@ -57,8 +58,31 @@ KNOWLEDGE_DB = os.getenv('KNOWLEDGE_DB', 'risk_dashboard.db')
 app = FastAPI(
     title="Risk Dashboard API",
     description="REST API for Banking Risk Dashboard with SSE streaming",
-    version="1.0.0"
+    version="1.0.0",
+    debug=True  # Enable debug mode to show detailed error tracebacks
 )
+
+# Global exception handler to catch and log all unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler to catch and log all unhandled exceptions"""
+    error_traceback = traceback.format_exc()
+    error_message = f"Internal server error: {str(exc)}"
+    
+    print(f"❌ UNHANDLED EXCEPTION in {request.method} {request.url}")
+    print(f"Exception: {exc}")
+    print(f"Full traceback:\n{error_traceback}")
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal Server Error",
+            "message": error_message,
+            "traceback": error_traceback if app.debug else None,
+            "path": str(request.url),
+            "method": request.method
+        }
+    )
 
 # Global change detection cache
 _change_detection_cache = {

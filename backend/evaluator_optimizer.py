@@ -371,6 +371,32 @@ def process_news_with_evaluator_optimizer(news_data: Dict, max_iterations: int =
     Raises:
         Exception: If optimization fails (to be handled by Huey retries)
     """
+    # Check if story length is sufficient for processing
+    story = news_data.get('story', '')
+    if len(story) <= 450:
+        raise Exception(f"News story too short for analysis: {len(story)} characters (minimum 450 required). Skipping news ID: {news_data.get('newsId', 'UNKNOWN')}")
+    
+    # Check if headline already exists in news_articles table
+    from news_risk_analyzer import get_risk_db_connection
+    
+    headline = news_data.get('headline', '')
+    if headline:
+        try:
+            with get_risk_db_connection() as risk_conn:
+                existing_news = risk_conn.execute("""
+                    SELECT id FROM news_articles 
+                    WHERE headline = ?
+                """, [headline]).fetchone()
+                
+                if existing_news:
+                    raise Exception(f"Headline already exists in database (ID: {existing_news[0]}). Skipping news ID: {news_data.get('newsId', 'UNKNOWN')}")
+        except Exception as e:
+            # If it's our "already exists" exception, re-raise it
+            if "already exists in database" in str(e):
+                raise e
+            # For other database errors, log and continue (don't skip processing)
+            print(f"⚠️ Warning: Database check failed, continuing with processing: {e}")
+    
     # Initialize the optimizer
     optimizer = RiskAnalysisEvaluatorOptimizer(max_iterations=max_iterations)
     

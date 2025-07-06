@@ -116,21 +116,6 @@ def llm_call(messages: list, model: str = None, temperature: float = 0.1) -> str
         
         provider = os.getenv('LLM_PROVIDER', 'openai').lower()
         
-        # Log the request
-        logger.info(f"🤖 LLM REQUEST START")
-        logger.info(f"Provider: {provider}")
-        logger.info(f"Model: {model}")
-        logger.info(f"Temperature: {temperature}")
-        logger.info(f"Messages count: {len(messages)}")
-        
-        # Log each message with content preview
-        for i, message in enumerate(messages):
-            role = message.get('role', 'unknown')
-            content = message.get('content', '')
-            content_preview = content[:200] + "..." if len(content) > 200 else content
-            logger.info(f"Message {i+1} ({role}): {content_preview}")
-        
-        logger.info("📤 Sending request to LLM...")
         
         response = client.chat.completions.create(
             model=model,
@@ -140,22 +125,12 @@ def llm_call(messages: list, model: str = None, temperature: float = 0.1) -> str
         
         response_content = response.choices[0].message.content
         
-        # Log the response
-        logger.info(f"📥 LLM RESPONSE RECEIVED")
-        logger.info(f"Response length: {len(response_content)} characters")
-        logger.info(f"Response preview: {response_content[:300]}...")
         
         # Log full response for debugging (can be disabled in production)
         debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
         if debug_mode:
             logger.info(f"🔍 FULL LLM RESPONSE:\n{response_content}")
-        
-        # Log token usage if available
-        if hasattr(response, 'usage') and response.usage:
-            logger.info(f"💰 Token usage - Prompt: {response.usage.prompt_tokens}, Completion: {response.usage.completion_tokens}, Total: {response.usage.total_tokens}")
-        
-        logger.info(f"✅ LLM REQUEST COMPLETED")
-        
+
         return response_content
         
     except Exception as e:

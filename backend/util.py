@@ -7,13 +7,31 @@ import openai
 import os
 import re
 import json
+import logging
 from typing import Dict, Any, Optional
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv(override=True)  # Force reload environment variables
+
+# Configure logging
+log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+
+log_file = os.path.join(log_dir, 'llm_calls.log')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 def safe_json_loads(field_value, default=None):
@@ -98,19 +116,58 @@ def llm_call(messages: list, model: str = None, temperature: float = 0.1) -> str
         
         provider = os.getenv('LLM_PROVIDER', 'openai').lower()
         
+        # Log the request
+        logger.info(f"🤖 LLM REQUEST START")
+        logger.info(f"Provider: {provider}")
+        logger.info(f"Model: {model}")
+        logger.info(f"Temperature: {temperature}")
+        logger.info(f"Messages count: {len(messages)}")
+        
+        # Log each message with content preview
+        for i, message in enumerate(messages):
+            role = message.get('role', 'unknown')
+            content = message.get('content', '')
+            content_preview = content[:200] + "..." if len(content) > 200 else content
+            logger.info(f"Message {i+1} ({role}): {content_preview}")
+        
+        logger.info("📤 Sending request to LLM...")
+        
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature
         )
         
-        return response.choices[0].message.content
+        response_content = response.choices[0].message.content
+        
+        # Log the response
+        logger.info(f"📥 LLM RESPONSE RECEIVED")
+        logger.info(f"Response length: {len(response_content)} characters")
+        logger.info(f"Response preview: {response_content[:300]}...")
+        
+        # Log full response for debugging (can be disabled in production)
+        debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+        if debug_mode:
+            logger.info(f"🔍 FULL LLM RESPONSE:\n{response_content}")
+        
+        # Log token usage if available
+        if hasattr(response, 'usage') and response.usage:
+            logger.info(f"💰 Token usage - Prompt: {response.usage.prompt_tokens}, Completion: {response.usage.completion_tokens}, Total: {response.usage.total_tokens}")
+        
+        logger.info(f"✅ LLM REQUEST COMPLETED")
+        
+        return response_content
         
     except Exception as e:
         provider = os.getenv('LLM_PROVIDER', 'openai').lower()
         provider_name = "Azure OpenAI" if provider == 'azure' else "OpenAI"
+        error_msg = f"{provider_name} API call failed: {str(e)}"
+        
+        # Log the error
+        logger.error(f"❌ LLM REQUEST FAILED: {error_msg}")
+        
         # Let Huey handle retries - just re-raise the exception
-        raise Exception(f"{provider_name} API call failed: {str(e)}")
+        raise Exception(error_msg)
 
 
 def extract_xml(text: str, tag: str) -> Optional[str]:

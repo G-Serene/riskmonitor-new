@@ -24,13 +24,15 @@ CONNECTION_TIMEOUT=30
 # Recommended: 1 for faster processing, 2-3 for higher quality
 MAX_OPTIMIZATION_ITERATIONS=1
 
+# Logging Configuration
+# Set to true to enable detailed LLM request/response logging
+DEBUG_MODE=true
+LOG_OPTIMIZATION_DETAILS=true
+
 # Usage Notes:
 # - All news articles now use the Evaluator-Optimizer pattern
 # - No fallback to basic analysis - failures are handled by Huey retries
 # - If all retries fail, processing halts with error message
 # - Clean implementation following Anthropic "Building Effective Agents" cookbook
-
-# Development/Testing Configuration
-# Set to false in production
-DEBUG_MODE=false
-LOG_OPTIMIZATION_DETAILS=true
+# - LLM calls are now logged to llm_calls.log file
+# - Set DEBUG_MODE=true to see full LLM responses in logs

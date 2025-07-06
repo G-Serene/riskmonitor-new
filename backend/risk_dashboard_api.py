@@ -1072,7 +1072,9 @@ async def generate_theme_storyline(
                     print(f"   Total articles for theme (all time): {date_info['total_articles_for_theme']}")
                 else:
                     print(f"⚠️ No articles found for theme {theme_id} in database")
-            cursor = conn.execute("""
+                
+                # Get articles for this theme (keeping connection open)
+                cursor = conn.execute("""
                 SELECT 
                     id, headline, content, summary, description, source_name,
                     countries, affected_markets, financial_exposure, 
@@ -1085,88 +1087,88 @@ async def generate_theme_storyline(
                     AND sentiment_score < 0  -- Only negative news
                     AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-{} days')
                 ORDER BY overall_risk_score DESC, published_date DESC
-            """.format(days_back), [theme_id])
-            
-            all_articles = cursor.fetchall()
-            print(f"📰 Found {len(all_articles)} articles in database")
-            
-            if not all_articles:
-                print(f"❌ No articles found for theme: {theme_id}")
-                raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
-            
-            # Convert rows to dictionaries for easier handling
-            articles_data = []
-            for row in all_articles:
-                article_dict = dict(row)
-                # Parse JSON fields safely
-                if article_dict.get("countries"):
-                    try:
-                        article_dict["countries"] = json.loads(article_dict["countries"])
-                    except:
-                        article_dict["countries"] = []
+                """.format(days_back), [theme_id])
                 
-                if article_dict.get("affected_markets"):
-                    try:
-                        article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
-                    except:
-                        article_dict["affected_markets"] = []
+                all_articles = cursor.fetchall()
+                print(f"📰 Found {len(all_articles)} articles in database")
                 
-                if article_dict.get("theme_keywords"):
-                    try:
-                        article_dict["theme_keywords"] = json.loads(article_dict["theme_keywords"])
-                    except:
-                        article_dict["theme_keywords"] = []
+                if not all_articles:
+                    print(f"❌ No articles found for theme: {theme_id}")
+                    raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
                 
-                articles_data.append(article_dict)
-            
-            theme_name = articles_data[0]["theme_display_name"]
-            
-            print(f"🎯 Found {len(articles_data)} articles for theme: {theme_name}")
-            
-            # Check for cached storyline (only if not forcing regeneration)
-            if not force_regenerate:
-                print("🔍 Checking for cached storyline...")
-                cached_cursor = conn.execute("""
-                    SELECT storyline, generated_at, article_count
-                    FROM risk_storylines 
-                    WHERE theme_id = ? 
-                        AND generated_at >= datetime('now', '-1 day')
-                    ORDER BY generated_at DESC 
-                    LIMIT 1
-                """, [theme_id])
-                
-                cached_result = cached_cursor.fetchone()
-                if cached_result:
-                    cached_article_count = cached_result[2]
-                    current_article_count = len(articles_data)
+                # Convert rows to dictionaries for easier handling
+                articles_data = []
+                for row in all_articles:
+                    article_dict = dict(row)
+                    # Parse JSON fields safely
+                    if article_dict.get("countries"):
+                        try:
+                            article_dict["countries"] = json.loads(article_dict["countries"])
+                        except:
+                            article_dict["countries"] = []
                     
-                    # Check if significant new articles have arrived (>20% increase or >5 new articles)
-                    article_increase = current_article_count - cached_article_count
-                    article_increase_pct = (article_increase / max(cached_article_count, 1)) * 100
+                    if article_dict.get("affected_markets"):
+                        try:
+                            article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
+                        except:
+                            article_dict["affected_markets"] = []
                     
-                    # Check how old the cache is
-                    cache_age_hours = (datetime.now() - datetime.fromisoformat(cached_result[1])).total_seconds() / 3600
+                    if article_dict.get("theme_keywords"):
+                        try:
+                            article_dict["theme_keywords"] = json.loads(article_dict["theme_keywords"])
+                        except:
+                            article_dict["theme_keywords"] = []
                     
-                    if article_increase_pct < 20 and article_increase < 5 and cache_age_hours < 6:
-                        print(f"📦 Using cached storyline from {cached_result[1]} (articles: {cached_article_count} vs {current_article_count})")
-                        return {
-                            "theme_id": theme_id,
-                            "theme_name": theme_name,
-                            "storyline": cached_result[0],
-                            "context": {"cached": True, "generated_at": cached_result[1]},
-                            "metadata": {
-                                "cached": True,
-                                "articles_analyzed": len(articles_data),
-                                "cached_article_count": cached_result[2],
-                                "new_articles_since_cache": article_increase,
-                                "cache_age_hours": round(cache_age_hours, 1),
-                                "generation_date": cached_result[1]
+                    articles_data.append(article_dict)
+                
+                theme_name = articles_data[0]["theme_display_name"]
+                
+                print(f"🎯 Found {len(articles_data)} articles for theme: {theme_name}")
+                
+                # Check for cached storyline (only if not forcing regeneration)
+                if not force_regenerate:
+                    print("🔍 Checking for cached storyline...")
+                    cached_cursor = conn.execute("""
+                        SELECT storyline, generated_at, article_count
+                        FROM risk_storylines 
+                        WHERE theme_id = ? 
+                            AND generated_at >= datetime('now', '-1 day')
+                        ORDER BY generated_at DESC 
+                        LIMIT 1
+                    """, [theme_id])
+                    
+                    cached_result = cached_cursor.fetchone()
+                    if cached_result:
+                        cached_article_count = cached_result[2]
+                        current_article_count = len(articles_data)
+                        
+                        # Check if significant new articles have arrived (>20% increase or >5 new articles)
+                        article_increase = current_article_count - cached_article_count
+                        article_increase_pct = (article_increase / max(cached_article_count, 1)) * 100
+                        
+                        # Check how old the cache is
+                        cache_age_hours = (datetime.now() - datetime.fromisoformat(cached_result[1])).total_seconds() / 3600
+                        
+                        if article_increase_pct < 20 and article_increase < 5 and cache_age_hours < 6:
+                            print(f"📦 Using cached storyline from {cached_result[1]} (articles: {cached_article_count} vs {current_article_count})")
+                            return {
+                                "theme_id": theme_id,
+                                "theme_name": theme_name,
+                                "storyline": cached_result[0],
+                                "context": {"cached": True, "generated_at": cached_result[1]},
+                                "metadata": {
+                                    "cached": True,
+                                    "articles_analyzed": len(articles_data),
+                                    "cached_article_count": cached_result[2],
+                                    "new_articles_since_cache": article_increase,
+                                    "cache_age_hours": round(cache_age_hours, 1),
+                                    "generation_date": cached_result[1]
+                                }
                             }
-                        }
-                    else:
-                        print(f"🔄 Cache stale: {article_increase} new articles ({article_increase_pct:.1f}% increase), {cache_age_hours:.1f}h old")
-            else:
-                print("🔄 Force regenerating storyline (cache bypassed)")
+                        else:
+                            print(f"🔄 Cache stale: {article_increase} new articles ({article_increase_pct:.1f}% increase), {cache_age_hours:.1f}h old")
+                else:
+                    print("🔄 Force regenerating storyline (cache bypassed)")
             
             # Use smart selection if we have too many articles
             if len(articles_data) > max_articles:

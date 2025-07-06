@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button"
 import { TrendingUp, TrendingDown, Minus, ExternalLink } from "lucide-react"
 import type { TrendingRiskTopic } from "@/types/trending-risks"
 
+// Configurable limit for trending topics - change this to adjust how many topics are shown
+const TRENDING_TOPICS_LIMIT = 8
+
 interface TrendingRisksDetailedProps {
   data: TrendingRiskTopic[]
 }
@@ -39,7 +42,7 @@ export function TrendingRisksDetailed({ data }: TrendingRisksDetailedProps) {
 
   return (
     <div className="space-y-4">
-      {data.slice(0, 8).map((topic, index) => (
+      {data.slice(0, TRENDING_TOPICS_LIMIT).map((topic, index) => (
         <Card key={topic.topic} className="hover:shadow-md transition-shadow">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between">

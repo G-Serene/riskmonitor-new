@@ -49,7 +49,7 @@ class RiskAnalysisEvaluatorOptimizer:
     Generator creates risk analysis, Evaluator provides feedback, loop until acceptable.
     """
     
-    def __init__(self, max_iterations: int = 3):
+    def __init__(self, max_iterations: int = 1):
         """
         Initialize the Evaluator-Optimizer system.
         

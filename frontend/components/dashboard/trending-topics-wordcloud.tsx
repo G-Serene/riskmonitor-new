@@ -4,6 +4,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { TrendingUp } from "lucide-react"
 import type { TrendingTopic } from "@/lib/api-client"
 
+// Configurable limit for trending topics - change this to adjust how many topics are shown
+const TRENDING_TOPICS_LIMIT = 8
+
 interface TrendingTopicsWordCloudProps {
   data: TrendingTopic[]
   className?: string
@@ -47,8 +50,8 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
     }
   }
 
-  // Generate circular word cloud positions
-  const getWordPosition = (index: number, total: number) => {
+  // Generate improved word cloud positions with better spacing
+  const getWordPosition = (index: number, total: number, word: string) => {
     if (index === 0) {
       // First word (most frequent) in center
       return {
@@ -58,22 +61,37 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
       }
     }
     
-    // Create concentric circles for other words
-    const layer = Math.floor((index - 1) / 6) + 1 // 6 words per layer
-    const posInLayer = (index - 1) % 6
-    const angleStep = (2 * Math.PI) / 6 // 6 positions per circle
-    const angle = posInLayer * angleStep
+    // Improved positioning algorithm with better spacing
+    const wordsPerLayer = [0, 6, 8, 10, 12] // Variable words per layer for better distribution
+    let currentLayer = 1
+    let remainingIndex = index - 1
     
-    const radius = layer * 35 // Distance from center
+    // Find which layer this word belongs to
+    while (remainingIndex >= wordsPerLayer[currentLayer] && currentLayer < wordsPerLayer.length - 1) {
+      remainingIndex -= wordsPerLayer[currentLayer]
+      currentLayer++
+    }
+    
+    // Position within the layer
+    const posInLayer = remainingIndex
+    const wordsInThisLayer = wordsPerLayer[currentLayer] || 12
+    const angleStep = (2 * Math.PI) / wordsInThisLayer
+    const angle = posInLayer * angleStep + (currentLayer * 0.3) // Slight rotation offset per layer
+    
+    // Dynamic radius based on layer and word length
+    const baseRadius = currentLayer * 45 // Increased base spacing
+    const wordLengthFactor = Math.min(word.length * 2, 20) // Account for word length
+    const radius = baseRadius + wordLengthFactor
+    
     const centerX = 50
     const centerY = 50
     
-    const x = centerX + (Math.cos(angle) * radius * 0.85) // 0.85 for controlled spread
-    const y = centerY + (Math.sin(angle) * radius * 0.65) // 0.65 for compact height
+    const x = centerX + (Math.cos(angle) * radius * 0.75) // Reduced spread for better fit
+    const y = centerY + (Math.sin(angle) * radius * 0.55) // Reduced vertical spread
     
     return {
-      left: `${Math.max(10, Math.min(90, x))}%`,
-      top: `${Math.max(20, Math.min(80, y))}%`,
+      left: `${Math.max(8, Math.min(92, x))}%`,
+      top: `${Math.max(15, Math.min(85, y))}%`,
       transform: 'translate(-50%, -50%)'
     }
   }
@@ -81,7 +99,7 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
   // Sort by frequency for better layout
   const sortedTopics = [...data]
     .sort((a, b) => b.frequency - a.frequency)
-    .slice(0, 18) // More topics with increased space
+    .slice(0, TRENDING_TOPICS_LIMIT) // Use configurable limit instead of hardcoded 18
 
   return (
     <Card className={`${className}`}>
@@ -95,10 +113,10 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="relative min-h-[160px] w-full overflow-hidden">
+        <div className="relative min-h-[200px] w-full overflow-hidden">
           {sortedTopics.map((topic, index) => {
             const style = getWordStyle(topic, index)
-            const position = getWordPosition(index, sortedTopics.length)
+            const position = getWordPosition(index, sortedTopics.length, topic.keyword)
             return (
               <span
                 key={topic.keyword}
@@ -119,11 +137,11 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
         </div>
         
         {sortedTopics.length === 0 && (
-          <div className="flex items-center justify-center min-h-[160px] text-muted-foreground text-sm">
+          <div className="flex items-center justify-center min-h-[200px] text-muted-foreground text-sm">
             No trending topics found
           </div>
         )}
       </CardContent>
     </Card>
   )
-} 
+}

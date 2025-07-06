@@ -14,6 +14,7 @@ openai>=1.0.0
 
 # Task Queue & Background Processing
 huey>=2.4.5
+redis>=5.0.0  # For Redis backend support with multiple consumers
 
 # Environment & Configuration
 python-dotenv==1.0.0

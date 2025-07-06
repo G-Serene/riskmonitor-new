@@ -3,6 +3,9 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts"
 import type { TrendingRiskTopic } from "@/types/trending-risks"
 
+// Configurable limit for trending topics - change this to adjust how many topics are shown
+const TRENDING_TOPICS_LIMIT = 8
+
 interface TrendingRisksChartProps {
   data: TrendingRiskTopic[]
   className?: string
@@ -26,7 +29,7 @@ export function TrendingRisksChart({ data, className }: TrendingRisksChartProps)
   }
 
   // Prepare data for chart
-  const chartData = data.slice(0, 10).map((topic) => ({
+  const chartData = data.slice(0, TRENDING_TOPICS_LIMIT).map((topic) => ({
     topic: topic.topic.length > 20 ? topic.topic.substring(0, 20) + "..." : topic.topic,
     fullTopic: topic.topic,
     mentions: topic.mentions,

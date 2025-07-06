@@ -405,9 +405,6 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <h3 className="font-medium text-gray-900 truncate">{theme.theme_name}</h3>
-                              <Badge variant="secondary" className={`px-3 py-1 font-semibold ${getRiskScoreColor(theme.avg_risk_score)}`}>
-                                Avg. risk: {theme.avg_risk_score.toFixed(1)}
-                              </Badge>
                             </div>
                             <p className="text-xs text-gray-500 mt-0.5">
                               {existingStoryline ? (

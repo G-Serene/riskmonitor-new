@@ -14,7 +14,7 @@ import sqlite3
 import json
 import os
 from datetime import datetime
-from huey import SqliteHuey, crontab
+from huey import crontab
 from contextlib import contextmanager
 from threading import Lock
 from dotenv import load_dotenv
@@ -59,7 +59,7 @@ class Config:
     CONNECTION_TIMEOUT = int(os.getenv('CONNECTION_TIMEOUT', '30'))
     
     # Evaluator-Optimizer Configuration
-    MAX_OPTIMIZATION_ITERATIONS = int(os.getenv('MAX_OPTIMIZATION_ITERATIONS', '3'))
+    MAX_OPTIMIZATION_ITERATIONS = int(os.getenv('MAX_OPTIMIZATION_ITERATIONS', '1'))
     
     @classmethod
     def validate(cls):
@@ -165,9 +165,8 @@ def get_knowledge_db_connection():
 # SETUP: Huey Configuration
 # ==========================================
 
-# SQLite-backed queue (persistent, survives restarts)
-# IMPORTANT: Use consistent name to avoid __main__ vs module_name conflicts
-huey = SqliteHuey(name='news_risk_analyzer', filename='news_processing_queue.db')
+# Import configurable Huey instance (supports SQLite, Redis, Memory backends)
+from huey_config import huey
 
 # Configure OpenAI - using new client pattern (handled in util.py)
 # No need to set openai.api_key here as util.py handles OpenAI client initialization
@@ -327,7 +326,7 @@ def process_news_article(news_data):
             # Execute insert with transaction management
             cursor = risk_conn.execute("""
                 INSERT INTO news_articles (
-                    headline, content, summary, source_name, published_date, processed_date,
+                    id, headline, content, summary, source_name, published_date, processed_date,
                     risk_categories, risk_subcategories, primary_risk_category, secondary_risk_categories,
                     geographic_regions, industry_sectors, countries, coordinates, affected_markets,
                     severity_level, confidence_score, sentiment_score, impact_score, overall_risk_score,
@@ -341,7 +340,7 @@ def process_news_article(news_data):
                     historical_impact_analysis,
                     created_at, updated_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
@@ -356,6 +355,8 @@ def process_news_article(news_data):
                     ?, ?
                 )
             """, [
+                # ID field (1 field)
+                news_data['newsId'],
                 # Basic news data (6 fields)
                 news_data['headline'], 
                 news_data['story'], 
@@ -432,8 +433,8 @@ def process_news_article(news_data):
                 news_data['creationTimestamp']   # updated_at - use original creation timestamp
             ])
             
-            # Get the auto-generated ID for market exposures
-            risk_db_id = cursor.lastrowid
+            # Get the news_id for market exposures
+            risk_db_id = news_data['newsId']
             
             # Commit transaction
             risk_conn.commit()

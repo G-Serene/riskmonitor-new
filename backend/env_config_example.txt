@@ -21,8 +21,8 @@ CONNECTION_TIMEOUT=30
 # Evaluator-Optimizer Workflow Configuration
 # NOTE: Fallback logic has been removed - only evaluator-optimizer pattern is used
 # Maximum number of optimization iterations (balance between quality and speed)
-# Recommended: 2-3 for production, higher for testing
-MAX_OPTIMIZATION_ITERATIONS=2
+# Recommended: 1 for faster processing, 2-3 for higher quality
+MAX_OPTIMIZATION_ITERATIONS=1
 
 # Usage Notes:
 # - All news articles now use the Evaluator-Optimizer pattern

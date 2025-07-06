@@ -8,6 +8,9 @@ export interface RiskFilters {
   breakingNewsOnly: boolean
   industrySectors: string[] // Industry sector filtering
   
+  // Theme filter
+  themes: string[] // Theme filtering
+  
   // Advanced filters
   countries: string[]
   riskCategories: string[]
@@ -39,6 +42,7 @@ export const DEFAULT_FILTERS: RiskFilters = {
   // timeRange removed - now controlled by main dashboard time window
   breakingNewsOnly: false,
   industrySectors: [],
+  themes: [],
   countries: [],
   riskCategories: [],
   confidenceRange: [0, 100],
@@ -192,6 +196,14 @@ export function applyFilters(articles: any[], filters: RiskFilters): any[] {
         articleSectors.includes(sector)
       )
       if (!hasMatchingIndustry) return false
+    }
+    
+    // Theme filter
+    if (filters.themes.length > 0) {
+      const themeMatch = filters.themes.some(theme =>
+        article.primary_theme === theme || article.theme_display_name === theme
+      )
+      if (!themeMatch) return false
     }
     
     // Risk categories

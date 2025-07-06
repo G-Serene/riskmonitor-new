@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Slider } from "@/components/ui/slider"
@@ -26,6 +26,7 @@ import {
   getFilterSummary,
   hasAdvancedFiltersActive
 } from "@/lib/filters"
+import { apiClient } from "@/lib/api-client"
 
 interface QuickFiltersProps {
   filters: RiskFilters
@@ -41,6 +42,19 @@ export function QuickFilters({
   articleCount 
 }: QuickFiltersProps) {
   const [showPresets, setShowPresets] = useState(false)
+  const [availableThemes, setAvailableThemes] = useState<{ id: string, name: string }[]>([])
+
+  useEffect(() => {
+    async function fetchThemes() {
+      try {
+        const res = await apiClient.getThemeStatistics()
+        setAvailableThemes((res.themes || []).map((t: any) => ({ id: t.theme_id, name: t.theme_name })))
+      } catch (e) {
+        setAvailableThemes([])
+      }
+    }
+    fetchThemes()
+  }, [])
 
   const updateFilters = (updates: Partial<RiskFilters>) => {
     onFiltersChange({ ...filters, ...updates })
@@ -114,20 +128,33 @@ export function QuickFilters({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Time Range removed - now uses main dashboard time window */}
-
-        {/* Breaking News Toggle - Compact */}
-        <div className="flex items-center gap-1">
-          <Switch
-            id="breaking-news"
-            checked={filters.breakingNewsOnly}
-            onCheckedChange={(checked) => updateFilters({ breakingNewsOnly: checked })}
-            className="scale-90"
-          />
-          <Label htmlFor="breaking-news" className="text-xs font-medium cursor-pointer">
-            Breaking
-          </Label>
-        </div>
+        {/* Theme Dropdown - replaces Breaking News toggle */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className={`h-8 text-xs gap-1 ${filters.themes.length > 0 ? 'bg-blue-50 border-blue-200' : ''}`}>
+              🎯 Theme {filters.themes.length > 0 && `(${filters.themes.length})`}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuLabel className="text-xs">Themes</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {availableThemes.map((theme) => (
+              <DropdownMenuCheckboxItem
+                key={theme.id}
+                checked={filters.themes.includes(theme.name)}
+                onCheckedChange={(checked) => {
+                  const newThemes = checked 
+                    ? [...filters.themes, theme.name]
+                    : filters.themes.filter(t => t !== theme.name)
+                  updateFilters({ themes: newThemes })
+                }}
+                className="text-xs"
+              >
+                {theme.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Industry Sectors Dropdown - Compact */}
         <DropdownMenu>
@@ -248,15 +275,17 @@ export function QuickFilters({
           
           {/* Time range badge removed - now shown in main dashboard */}
           
-          {filters.breakingNewsOnly && (
-            <Badge variant="secondary" className="gap-1 text-xs h-6">
-              Breaking News
+          {filters.themes.map((theme) => (
+            <Badge key={theme} variant="secondary" className="gap-1 text-xs h-6">
+              {theme}
               <X 
                 className="h-3 w-3 cursor-pointer" 
-                onClick={() => updateFilters({ breakingNewsOnly: false })}
+                onClick={() => updateFilters({ 
+                  themes: filters.themes.filter(t => t !== theme) 
+                })}
               />
             </Badge>
-          )}
+          ))}
           
           {filters.industrySectors.map((sector) => (
             <Badge key={sector} variant="secondary" className="gap-1 text-xs h-6">

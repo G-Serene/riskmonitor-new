@@ -27,7 +27,7 @@ export const TIME_WINDOW_OPTIONS: TimeWindowOption[] = [
 
 // Helper function to check if a time window is considered "live" vs "historical"
 export const isLiveTimeWindow = (timeWindow: TimeWindow): boolean => {
-  return ["1h", "4h", "8h", "12h", "today"].includes(timeWindow)
+  return ["1h", "4h", "8h", "12h", "today", "7d"].includes(timeWindow)
 }
 
 // Helper function to get the maximum allowed time window for dashboard

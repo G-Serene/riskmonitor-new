@@ -12,6 +12,7 @@ import {
   AlertCircle,
   Wifi,
   WifiOff,
+  RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -62,6 +63,7 @@ import { formatRelativeTime } from "@/lib/time-utils"
 import { RiskFilters, DEFAULT_FILTERS, applyFilters } from "@/lib/filters"
 import { getUrgencyColor, getTemporalImpactColor } from "@/lib/risk-utils"
 import React, { useEffect, useState, useMemo } from "react"
+import { useToast } from "@/hooks/use-toast"
 
 export default function RiskDashboardContent() {
   const [initialData, setInitialData] = useState<DashboardData | null>(null)
@@ -78,6 +80,8 @@ export default function RiskDashboardContent() {
   const [newsOffset, setNewsOffset] = useState(0)
   const [newsHasMore, setNewsHasMore] = useState(true)
   const NEWS_PAGE_SIZE = 50;
+  const { toast } = useToast()
+  const [refreshing, setRefreshing] = useState(false)
 
   // Use SSE for real-time updates
   const { data: sseData, status: sseStatus, clearPendingUpdates, clearSSEData } = useDashboardSSE(timeWindow)
@@ -126,6 +130,7 @@ export default function RiskDashboardContent() {
 
   // Manual refresh function
   const handleRefresh = async () => {
+    setRefreshing(true)
     try {
       const [dashboardData, newsResponse] = await Promise.all([
         apiClient.getDashboardData(timeWindow, dateRange),
@@ -135,10 +140,14 @@ export default function RiskDashboardContent() {
       setNewsData(newsResponse.articles)
       setError(null)
       clearPendingUpdates()
+      toast({ title: "Dashboard refreshed!", description: "Latest data loaded.", })
       console.log("Data refreshed manually with time window:", timeWindow)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to refresh data")
+      toast({ title: "Refresh failed", description: err instanceof Error ? err.message : "Failed to refresh data", })
       console.error("Manual refresh error:", err)
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -167,7 +176,8 @@ export default function RiskDashboardContent() {
 
     // Merge news: combine initial news with SSE updates, avoiding duplicates
     let mergedNews = newsData || []
-    if (sseData.newsArticles.length > 0) {
+    // Only merge SSE news if in live mode
+    if (isLiveTimeWindow(timeWindow) && sseData.newsArticles.length > 0) {
       const existingIds = new Set(mergedNews.map(article => article.id))
       const newArticles = sseData.newsArticles.filter(article => !existingIds.has(article.id))
       mergedNews = [...newArticles, ...mergedNews] // New articles first
@@ -179,13 +189,16 @@ export default function RiskDashboardContent() {
       })
     }
 
+    // Only use SSE data for dashboard fields if in live mode
+    const useSSE = isLiveTimeWindow(timeWindow)
+
     return {
-      dashboard_summary: (sseData.dashboardSummary && Object.keys(sseData.dashboardSummary).length > 0) 
+      dashboard_summary: (useSSE && sseData.dashboardSummary && Object.keys(sseData.dashboardSummary).length > 0) 
         ? sseData.dashboardSummary 
         : initialData.dashboard_summary,
       sentiment_analysis: initialData.sentiment_analysis,
       trending_topics: initialData.trending_topics,
-      risk_breakdown: sseData.riskBreakdown.length > 0 ? sseData.riskBreakdown : initialData.risk_breakdown,
+      risk_breakdown: (useSSE && sseData.riskBreakdown.length > 0) ? sseData.riskBreakdown : initialData.risk_breakdown,
       geographic_risk: initialData.geographic_risk,
       news_feed: mergedNews,
       time_window: initialData.time_window,
@@ -193,7 +206,7 @@ export default function RiskDashboardContent() {
       generated_at: initialData.generated_at,
       cache_timestamp: initialData.cache_timestamp,
     }
-  }, [initialData, sseData, newsData])
+  }, [initialData, sseData, newsData, timeWindow])
 
   // Apply filters to merged news data from dashboardData
   const filteredNewsData = useMemo(() => {
@@ -343,7 +356,20 @@ export default function RiskDashboardContent() {
   if (!dashboardData) return null
 
   return (
-    <>
+    <div className="flex flex-col gap-4">
+      {/* Dashboard Header with Refresh Button */}
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-2xl font-bold">Risk Dashboard</h1>
+        <Button variant="outline" size="sm" onClick={handleRefresh} className="flex items-center gap-2" disabled={refreshing}>
+          {refreshing ? (
+            <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400 mr-2"></span>
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </Button>
+      </div>
+      {/* Existing dashboard content follows here */}
       {/* Live Updates Notification */}
       <LiveUpdatesNotification
         currentTimeWindow={timeWindow}
@@ -1073,6 +1099,6 @@ export default function RiskDashboardContent() {
           )}
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   )
 }

@@ -375,7 +375,7 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
   return (
     <div className={`flex flex-col space-y-4 h-full ${className}`}>
       {/* Theme Statistics Bar Chart */}
-      <Card className="flex-1 flex flex-col min-h-0">
+      <Card className="flex-1 flex flex-col min-h-0 max-h-[600px]">
         <CardHeader className="flex-shrink-0">
           <CardTitle className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5" />
@@ -385,10 +385,12 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
             Last 15 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4 p-6">
-            {themeStats.length > 0 ? (
-              <TooltipProvider>
-                {themeStats.map((theme, index) => {
+        <CardContent className="flex-1 flex flex-col min-h-0 p-6">
+          <ScrollArea className="flex-1 pr-4">
+            <div className="space-y-4">
+              {themeStats.length > 0 ? (
+                <TooltipProvider>
+                  {themeStats.map((theme, index) => {
                   const existingStoryline = existingStorylines?.storylines.find(s => s.theme_id === theme.theme_id)
                   const isGenerating = generatingStoryline && generatingThemeId === theme.theme_id
                   
@@ -487,13 +489,15 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
                       </div>
                     </div>
                   )
-                })}
-              </TooltipProvider>
-            ) : (
-              <div className="text-center text-muted-foreground py-8">
-                <p>No theme data available</p>
-              </div>
-            )}
+                  })}
+                </TooltipProvider>
+              ) : (
+                <div className="text-center text-muted-foreground py-8">
+                  <p>No theme data available</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </CardContent>
       </Card>
 

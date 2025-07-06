@@ -278,6 +278,14 @@ def validate_risk_analysis(analysis: Dict[str, Any]) -> Dict[str, Any]:
         if not (0 <= analysis.get('impact_score', 0) <= 100):
             analysis['impact_score'] = max(0, min(100, analysis.get('impact_score', 50)))
         
+        # Convert integer score fields to ensure consistency with database schema
+        analysis['confidence_score'] = int(analysis.get('confidence_score', 50))
+        analysis['impact_score'] = int(analysis.get('impact_score', 50))
+        
+        # Convert theme_confidence to integer if present (set by theme classification system)
+        if 'theme_confidence' in analysis:
+            analysis['theme_confidence'] = int(analysis.get('theme_confidence', 30))
+        
         # Ensure sentiment score is between -1 and 1
         sentiment = analysis.get('sentiment_score', 0.0)
         if not (-1.0 <= sentiment <= 1.0):

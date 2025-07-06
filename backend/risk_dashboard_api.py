@@ -363,6 +363,16 @@ async def get_recent_news_feed(
             # Build time window clause
             time_clause = time_window_to_datetime_clause(time_window, from_date, to_date)
             
+            # Get total count first
+            count_query = f"""
+                SELECT COUNT(*) 
+                FROM news_articles 
+                WHERE status != 'Archived'
+                  AND {time_clause}
+            """
+            
+            total_count = conn.execute(count_query).fetchone()[0]
+            
             # Query the main news_articles table to get all required fields for the news feed
             query = f"""
                 SELECT 
@@ -432,6 +442,8 @@ async def get_recent_news_feed(
             return {
                 "articles": articles,
                 "count": len(articles),
+                "total_count": total_count,
+                "has_more": offset + limit < total_count,
                 "time_window": time_window,
                 "time_window_description": get_time_window_description(time_window, from_date, to_date),
                 "generated_at": datetime.now().isoformat()

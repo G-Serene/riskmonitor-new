@@ -18,9 +18,10 @@ import remarkGfm from 'remark-gfm'
 
 interface ThemeAnalyticsProps {
   className?: string
+  refreshKey?: number
 }
 
-export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
+export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
   const [themeStats, setThemeStats] = useState<ThemeStatistics[]>([])
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null)
   const [themeArticles, setThemeArticles] = useState<ThemeArticlesResponse | null>(null)
@@ -35,11 +36,11 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
   const [downloadingReport, setDownloadingReport] = useState(false)
   const { toast } = useToast()
 
-  // Fetch theme statistics and existing storylines on component mount
+  // Fetch theme statistics and existing storylines on component mount or when refreshKey changes
   useEffect(() => {
     fetchThemeStatistics()
     fetchExistingStorylines()
-  }, [])
+  }, [refreshKey])
 
   const fetchExistingStorylines = async () => {
     try {

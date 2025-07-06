@@ -71,8 +71,22 @@ export default function RiskDashboardContent() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filters, setFilters] = useState<RiskFilters>(DEFAULT_FILTERS)
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("today")
-  const [dateRange, setDateRange] = useState<DateRange>({})
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>(() => {
+    // Load saved time window from localStorage, default to "today" if not found
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dashboard-time-window')
+      return saved ? saved as TimeWindow : "today"
+    }
+    return "today"
+  })
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    // Load saved date range from localStorage if it exists
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('dashboard-date-range')
+      return saved ? JSON.parse(saved) : {}
+    }
+    return {}
+  })
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedNews, setSelectedNews] = useState<NewsArticle | null>(null)
   const [isNewsDialogOpen, setIsNewsDialogOpen] = useState(false)
@@ -82,6 +96,7 @@ export default function RiskDashboardContent() {
   const NEWS_PAGE_SIZE = 50;
   const { toast } = useToast()
   const [refreshing, setRefreshing] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   // Use SSE for real-time updates
   const { data: sseData, status: sseStatus, clearPendingUpdates, clearSSEData } = useDashboardSSE(timeWindow)
@@ -140,6 +155,7 @@ export default function RiskDashboardContent() {
       setNewsData(newsResponse.articles)
       setError(null)
       clearPendingUpdates()
+      setRefreshKey((k) => k + 1)
       toast({ title: "Dashboard refreshed!", description: "Latest data loaded.", })
       console.log("Data refreshed manually with time window:", timeWindow)
     } catch (err) {
@@ -326,6 +342,20 @@ export default function RiskDashboardContent() {
     }
   }
 
+  // Save timeWindow to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dashboard-time-window', timeWindow)
+    }
+  }, [timeWindow])
+
+  // Save dateRange to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dashboard-date-range', JSON.stringify(dateRange))
+    }
+  }, [dateRange])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -356,7 +386,7 @@ export default function RiskDashboardContent() {
   if (!dashboardData) return null
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 dashboard-container">
       {/* Dashboard Header with Refresh Button */}
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-bold">Risk Dashboard</h1>
@@ -462,9 +492,9 @@ export default function RiskDashboardContent() {
         </div>
 
         {/* Full Screen Layout: News Feed Left, Charts Middle, Theme Analytics Right */}
-        <div className="grid gap-4 lg:grid-cols-3 flex-1 min-h-0">
+        <div className="grid gap-4 lg:grid-cols-3 h-[calc(100vh-150px)] min-h-[600px]">
           {/* Left Third - Live News Feed */}
-          <Card className="flex flex-col h-full">
+          <Card className="flex flex-col h-full overflow-hidden">
             <CardHeader className="flex-shrink-0">
               <div className="flex flex-row items-center justify-between">
                 <div>
@@ -498,6 +528,7 @@ export default function RiskDashboardContent() {
                   onFiltersChange={setFilters}
                   onOpenAdvanced={() => setShowAdvancedFilters(true)}
                   articleCount={filteredNewsData.length}
+                  newsData={dashboardData?.news_feed || []}
                 />
               </div>
             </CardHeader>
@@ -512,8 +543,8 @@ export default function RiskDashboardContent() {
               availableRiskCategories={availableRiskCategories}
               availableSources={availableSources}
             />
-            <CardContent className="flex-1 overflow-hidden p-0 min-h-0">
-              <div className="news-feed-scroll px-6 pb-6">
+            <CardContent className="flex-1 overflow-hidden p-0 min-h-0 flex flex-col">
+              <div className="news-feed-scroll px-6 pb-6 flex-1">
                 <div className="space-y-4">
                 {filteredNewsData && filteredNewsData.length > 0 ? (
                   filteredNewsData.map((item: NewsArticle) => (
@@ -909,7 +940,7 @@ export default function RiskDashboardContent() {
 
           {/* Right Third - Theme Analytics */}
           <div className="flex flex-col h-full min-h-0">
-            <ThemeAnalytics className="flex-1 h-full" />
+            <ThemeAnalytics className="flex-1 h-full" refreshKey={refreshKey} />
           </div>
         </div>
       </main>

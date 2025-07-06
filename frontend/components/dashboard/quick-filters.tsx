@@ -20,13 +20,13 @@ import {
   RiskFilters, 
   DEFAULT_FILTERS, 
   SEVERITY_OPTIONS, 
-  INDUSTRY_SECTORS,
   SMART_PRESETS,
   FilterPreset,
   getFilterSummary,
   hasAdvancedFiltersActive
 } from "@/lib/filters"
 import { apiClient } from "@/lib/api-client"
+import React from "react" // Added for useMemo
 
 interface QuickFiltersProps {
   filters: RiskFilters
@@ -39,8 +39,9 @@ export function QuickFilters({
   filters, 
   onFiltersChange, 
   onOpenAdvanced,
-  articleCount 
-}: QuickFiltersProps) {
+  articleCount,
+  newsData = [] // <-- add newsData prop for dynamic options
+}: QuickFiltersProps & { newsData?: any[] }) {
   const [showPresets, setShowPresets] = useState(false)
   const [availableThemes, setAvailableThemes] = useState<{ id: string, name: string }[]>([])
 
@@ -55,6 +56,23 @@ export function QuickFilters({
     }
     fetchThemes()
   }, [])
+
+  // Dynamically compute available industries from news data
+  const availableIndustries = React.useMemo(() => {
+    const set = new Set<string>()
+    newsData.forEach(article => {
+      let sectors: string[] = []
+      try {
+        if (typeof article.industry_sectors === 'string') {
+          sectors = JSON.parse(article.industry_sectors)
+        } else if (Array.isArray(article.industry_sectors)) {
+          sectors = article.industry_sectors
+        }
+      } catch {}
+      sectors.forEach(s => set.add(s))
+    })
+    return Array.from(set).sort()
+  }, [newsData])
 
   const updateFilters = (updates: Partial<RiskFilters>) => {
     onFiltersChange({ ...filters, ...updates })
@@ -170,19 +188,19 @@ export function QuickFilters({
           <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuLabel className="text-xs">Industry Sectors</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {INDUSTRY_SECTORS.map((sector) => (
+            {availableIndustries.map((sector) => (
               <DropdownMenuCheckboxItem
-                key={sector.value}
-                checked={filters.industrySectors.includes(sector.value)}
+                key={sector}
+                checked={filters.industrySectors.includes(sector)}
                 onCheckedChange={(checked) => {
                   const newSectors = checked 
-                    ? [...filters.industrySectors, sector.value]
-                    : filters.industrySectors.filter(s => s !== sector.value)
+                    ? [...filters.industrySectors, sector]
+                    : filters.industrySectors.filter(s => s !== sector)
                   updateFilters({ industrySectors: newSectors })
                 }}
                 className="text-xs"
               >
-                {sector.label}
+                {sector}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
@@ -289,7 +307,7 @@ export function QuickFilters({
           
           {filters.industrySectors.map((sector) => (
             <Badge key={sector} variant="secondary" className="gap-1 text-xs h-6">
-              {INDUSTRY_SECTORS.find(s => s.value === sector)?.label || sector}
+              {sector}
               <X 
                 className="h-3 w-3 cursor-pointer" 
                 onClick={() => updateFilters({ 

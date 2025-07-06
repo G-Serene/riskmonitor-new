@@ -352,6 +352,7 @@ async def get_latest_news(
 @app.get("/api/news/feed")
 async def get_recent_news_feed(
     limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     time_window: str = Query("today", regex="^(1h|4h|8h|12h|today|yesterday|3d|7d|14d|1m|3m|6m|custom)$"),
     from_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
     to_date: str = Query(None, regex="^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
@@ -378,10 +379,10 @@ async def get_recent_news_feed(
                 WHERE status != 'Archived'
                   AND {time_clause}
                 ORDER BY published_date DESC 
-                LIMIT ?
+                LIMIT ? OFFSET ?
             """
             
-            rows = conn.execute(query, [limit]).fetchall()
+            rows = conn.execute(query, [limit, offset]).fetchall()
             
             def safe_json_loads(field_value, default=None):
                 """Safely parse JSON with error handling"""

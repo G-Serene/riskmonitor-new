@@ -75,61 +75,61 @@ export default function RiskDashboardContent() {
   const [selectedNews, setSelectedNews] = useState<NewsArticle | null>(null)
   const [isNewsDialogOpen, setIsNewsDialogOpen] = useState(false)
   const { isMobile } = useSidebar()
+  const [newsOffset, setNewsOffset] = useState(0)
+  const [newsHasMore, setNewsHasMore] = useState(true)
+  const NEWS_PAGE_SIZE = 50;
 
   // Use SSE for real-time updates
   const { data: sseData, status: sseStatus, clearPendingUpdates, clearSSEData } = useDashboardSSE(timeWindow)
 
-  // Fetch initial dashboard data
+  // Fetch initial dashboard data and first page of news
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
         setLoading(true)
+        setNewsOffset(0)
+        setNewsHasMore(true)
         console.log("Starting API calls with time window:", timeWindow)
-        
-        // Clear SSE data when time window changes to prevent stale data
-        console.log("Clearing SSE data for new time window:", timeWindow)
         clearSSEData()
-        
         const dashboardPromise = apiClient.getDashboardData(timeWindow, dateRange)
-        const newsPromise = apiClient.getNewsFeed(20, timeWindow, dateRange)  // Increased limit and uses dashboard time window
-        
-        console.log("Fetching dashboard data from:", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/risk/dashboard`)
-        console.log("Fetching news feed from:", `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/news/feed`)
-        
+        const newsPromise = apiClient.getNewsFeed(NEWS_PAGE_SIZE, timeWindow, dateRange, 0)
         const [dashboardData, newsResponse] = await Promise.all([
           dashboardPromise,
           newsPromise
         ])
-        
-        console.log("Dashboard data received:", dashboardData)
-        console.log("News data received:", newsResponse)
-        
         setInitialData(dashboardData)
         setNewsData(newsResponse.articles)
+        setNewsHasMore(newsResponse.articles.length === NEWS_PAGE_SIZE)
         setError(null)
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to fetch dashboard data"
         setError(errorMessage)
-        console.error("Dashboard API Error:", err)
-        console.error("Error details:", {
-          message: errorMessage,
-          stack: err instanceof Error ? err.stack : 'No stack trace',
-          cause: err instanceof Error ? err.cause : 'No cause'
-        })
       } finally {
         setLoading(false)
       }
     }
-
     fetchInitialData()
   }, [timeWindow, dateRange])
+
+  // Load more news for pagination
+  const handleLoadMoreNews = async () => {
+    try {
+      const nextOffset = newsData.length
+      const newsResponse = await apiClient.getNewsFeed(NEWS_PAGE_SIZE, timeWindow, dateRange, nextOffset)
+      setNewsData(prev => [...prev, ...newsResponse.articles])
+      setNewsOffset(nextOffset)
+      setNewsHasMore(newsResponse.articles.length === NEWS_PAGE_SIZE)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load more news")
+    }
+  }
 
   // Manual refresh function
   const handleRefresh = async () => {
     try {
       const [dashboardData, newsResponse] = await Promise.all([
         apiClient.getDashboardData(timeWindow, dateRange),
-        apiClient.getNewsFeed(20, timeWindow, dateRange)  // Uses main dashboard time window
+        apiClient.getNewsFeed(50, timeWindow, dateRange)  // Uses main dashboard time window
       ])
       setInitialData(dashboardData)
       setNewsData(newsResponse.articles)
@@ -449,6 +449,9 @@ export default function RiskDashboardContent() {
                       {dashboardData.time_window_description || "filtered by dashboard time window"}
                     </Badge>
                   </CardDescription>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    Showing {newsData.length} of {dashboardData.dashboard_summary.total_news_filtered} articles
+                  </div>
                 </div>
                 <div className="relative w-full max-w-sm">
                   <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -648,6 +651,13 @@ export default function RiskDashboardContent() {
                     <p className="text-sm">New articles will appear here automatically.</p>
                   </div>
                 )}
+                {newsHasMore && (
+                  <div className="flex justify-center mt-4">
+                    <Button onClick={handleLoadMoreNews} variant="outline">
+                      Load More
+                    </Button>
+                  </div>
+                )}
               </div>
               </div>
             </CardContent>
@@ -781,7 +791,7 @@ export default function RiskDashboardContent() {
                     LLM-based content analysis ({dashboardData.time_window_description || "last 24 hours"})
                   </CardDescription>
                   <div className="flex items-baseline gap-2">
-                    <CardTitle className="text-3xl">{filteredNewsData.length}</CardTitle>
+                    <CardTitle className="text-3xl">{dashboardData.dashboard_summary.total_news_filtered}</CardTitle>
                     <span className="text-xs text-muted-foreground">articles</span>
                   </div>
                 </CardHeader>

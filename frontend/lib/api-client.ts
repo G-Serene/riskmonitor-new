@@ -335,8 +335,8 @@ class ApiClient {
     return this.get<NewsResponse>("/api/news/latest", params)
   }
 
-  async getNewsFeed(limit = 20, timeWindow?: TimeWindow, dateRange?: DateRange): Promise<{ articles: NewsArticle[]; count: number; generated_at: string }> {
-    const params: Record<string, any> = { limit }
+  async getNewsFeed(limit = 20, timeWindow?: TimeWindow, dateRange?: DateRange, offset = 0): Promise<{ articles: NewsArticle[]; count: number; generated_at: string }> {
+    const params: Record<string, any> = { limit, offset }
     
     if (timeWindow) {
       params.time_window = timeWindow

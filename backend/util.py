@@ -129,7 +129,7 @@ def llm_call(messages: list, model: str = None, temperature: float = 0.1) -> str
         # Log full response for debugging (can be disabled in production)
         debug_mode = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
         if debug_mode:
-            logger.info(f"🔍 FULL LLM RESPONSE:\n{response_content}")
+            logger.info(f"FULL LLM RESPONSE:\n{response_content}")
 
         return response_content
         

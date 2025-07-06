@@ -62,6 +62,28 @@ app = FastAPI(
     debug=True  # Enable debug mode to show detailed error tracebacks
 )
 
+# HTTP exception handler to log HTTP errors
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP exception handler to log HTTP errors"""
+    print("=" * 60)
+    print(f"🚨 HTTP EXCEPTION HANDLER TRIGGERED")
+    print(f"🌐 Request: {request.method} {request.url}")
+    print(f"📊 Status Code: {exc.status_code}")
+    print(f"💬 Detail: {exc.detail}")
+    print("=" * 60)
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": "HTTP Error",
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+            "path": str(request.url),
+            "method": request.method
+        }
+    )
+
 # Global exception handler to catch and log all unhandled exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -69,9 +91,14 @@ async def global_exception_handler(request: Request, exc: Exception):
     error_traceback = traceback.format_exc()
     error_message = f"Internal server error: {str(exc)}"
     
-    print(f"❌ UNHANDLED EXCEPTION in {request.method} {request.url}")
-    print(f"Exception: {exc}")
-    print(f"Full traceback:\n{error_traceback}")
+    print("=" * 80)
+    print(f"❌ GLOBAL EXCEPTION HANDLER TRIGGERED")
+    print(f"🌐 Request: {request.method} {request.url}")
+    print(f"🔥 Exception Type: {type(exc).__name__}")
+    print(f"💬 Exception Message: {exc}")
+    print(f"📋 Full Traceback:")
+    print(error_traceback)
+    print("=" * 80)
     
     return JSONResponse(
         status_code=500,
@@ -80,7 +107,8 @@ async def global_exception_handler(request: Request, exc: Exception):
             "message": error_message,
             "traceback": error_traceback if app.debug else None,
             "path": str(request.url),
-            "method": request.method
+            "method": request.method,
+            "exception_type": type(exc).__name__
         }
     )
 
@@ -1000,17 +1028,50 @@ async def generate_theme_storyline(
     Generate a comprehensive risk storyline for a specific theme using enhanced LLM analysis.
     Handles large article volumes with intelligent selection and creates detailed banking impact analysis.
     """
+    print(f"🎯 Starting storyline generation for theme: {theme_id}")
+    print(f"📊 Parameters: max_articles={max_articles}, days_back={days_back}, force_regenerate={force_regenerate}")
+    
     try:
         # Import enhanced storyline generation utilities
-        from enhanced_storyline_generator import (
-            smart_article_selection,
-            create_storyline_context,
-            generate_comprehensive_storyline_prompt,
-            create_downloadable_report_data
-        )
+        print("📦 Importing enhanced storyline generation utilities...")
+        try:
+            from enhanced_storyline_generator import (
+                smart_article_selection,
+                create_storyline_context,
+                generate_comprehensive_storyline_prompt,
+                create_downloadable_report_data
+            )
+            print("✅ Successfully imported storyline generation utilities")
+        except ImportError as import_error:
+            print(f"❌ Failed to import storyline generation utilities: {import_error}")
+            print(f"Full traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Import error: {str(import_error)}")
+        except Exception as import_error:
+            print(f"❌ Unexpected error importing storyline utilities: {import_error}")
+            print(f"Full traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Unexpected import error: {str(import_error)}")
         
         # First, get ALL articles for this theme (not limited)
-        with get_db_connection() as conn:
+        print("🔍 Querying database for articles...")
+        try:
+            with get_db_connection() as conn:
+                # First, check the date range we're working with
+                date_info = conn.execute("""
+                    SELECT 
+                        MAX(published_date) as max_published_date,
+                        datetime((SELECT MAX(published_date) FROM news_articles), '-{} days') as cutoff_date,
+                        COUNT(*) as total_articles_for_theme
+                    FROM news_articles 
+                    WHERE primary_theme = ?
+                """.format(days_back), [theme_id]).fetchone()
+                
+                if date_info:
+                    print(f"📅 Date range info:")
+                    print(f"   Max published date in DB: {date_info['max_published_date']}")
+                    print(f"   Cutoff date ({days_back} days back): {date_info['cutoff_date']}")
+                    print(f"   Total articles for theme (all time): {date_info['total_articles_for_theme']}")
+                else:
+                    print(f"⚠️ No articles found for theme {theme_id} in database")
             cursor = conn.execute("""
                 SELECT 
                     id, headline, content, summary, description, source_name,
@@ -1022,13 +1083,15 @@ async def generate_theme_storyline(
                 FROM news_articles 
                 WHERE primary_theme = ?
                     AND sentiment_score < 0  -- Only negative news
-                    AND processed_date >= datetime('now', '-{} days')
+                    AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-{} days')
                 ORDER BY overall_risk_score DESC, published_date DESC
             """.format(days_back), [theme_id])
             
             all_articles = cursor.fetchall()
+            print(f"📰 Found {len(all_articles)} articles in database")
             
             if not all_articles:
+                print(f"❌ No articles found for theme: {theme_id}")
                 raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
             
             # Convert rows to dictionaries for easier handling
@@ -1121,12 +1184,26 @@ async def generate_theme_storyline(
             print(f"🤖 Generating comprehensive storyline using LLM...")
             
             # Generate storyline using LLM
-            from util import llm_call
+            print("🤖 Importing LLM utility...")
+            try:
+                from util import llm_call
+                print("✅ Successfully imported LLM utility")
+            except ImportError as llm_import_error:
+                print(f"❌ Failed to import LLM utility: {llm_import_error}")
+                print(f"Full traceback: {traceback.format_exc()}")
+                raise HTTPException(status_code=500, detail=f"LLM import error: {str(llm_import_error)}")
             
-            storyline_response = llm_call(
-                messages=[{"role": "user", "content": storyline_prompt}],
-                temperature=0.1
-            )
+            print("🤖 Calling LLM for storyline generation...")
+            try:
+                storyline_response = llm_call(
+                    messages=[{"role": "user", "content": storyline_prompt}],
+                    temperature=0.1
+                )
+                print("✅ LLM call successful")
+            except Exception as llm_error:
+                print(f"❌ LLM call failed: {llm_error}")
+                print(f"Full traceback: {traceback.format_exc()}")
+                raise HTTPException(status_code=500, detail=f"LLM call error: {str(llm_error)}")
             
             storyline = storyline_response.strip()
             
@@ -1134,19 +1211,27 @@ async def generate_theme_storyline(
             report_data = create_downloadable_report_data(storyline, context, selected_articles)
             
             # Store storyline in database for caching
-            with get_db_connection() as conn:
-                conn.execute("""
-                    INSERT OR REPLACE INTO risk_storylines 
-                    (theme_id, theme_name, storyline, article_count, 
-                     affected_countries, affected_markets, generated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, [
-                    theme_id, theme_name, storyline, len(selected_articles),
-                    json.dumps(context['geographic_scope']['countries'][:20]), 
-                    json.dumps(context['market_scope']['markets'][:20]),
-                    datetime.now().isoformat()
-                ])
-                conn.commit()
+            print("💾 Storing storyline in database...")
+            try:
+                with get_db_connection() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO risk_storylines 
+                        (theme_id, theme_name, storyline, article_count, 
+                         affected_countries, affected_markets, generated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, [
+                        theme_id, theme_name, storyline, len(selected_articles),
+                        json.dumps(context['geographic_scope']['countries'][:20]), 
+                        json.dumps(context['market_scope']['markets'][:20]),
+                        datetime.now().isoformat()
+                    ])
+                    conn.commit()
+                    print("✅ Storyline stored successfully")
+            except Exception as db_error:
+                print(f"❌ Database storage failed: {db_error}")
+                print(f"Full traceback: {traceback.format_exc()}")
+                # Don't raise here - we can still return the storyline even if caching fails
+                print("⚠️ Continuing without caching...")
             
             return {
                 "theme_id": theme_id,
@@ -1165,7 +1250,17 @@ async def generate_theme_storyline(
                 }
             }
             
+        except Exception as db_query_error:
+            print(f"❌ Database query failed: {db_query_error}")
+            print(f"Full traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Database query error: {str(db_query_error)}")
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 404) without modification
+        raise
     except Exception as e:
+        print(f"❌ UNEXPECTED ERROR in storyline generation: {e}")
+        print(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Storyline generation error: {str(e)}")
 
 @app.get("/api/storylines")

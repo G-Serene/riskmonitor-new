@@ -253,18 +253,15 @@ def process_news_article(news_data):
                   f"final status: {optimization_meta['final_evaluation']}")
         
         # ==========================================
-        # STEP 1.6: Post-analysis Sentiment Filter - Skip positive sentiment news
+        # STEP 1.6: Post-analysis Sentiment/Impact Filter - Skip positive/neutral sentiment or low impact news
         # ==========================================
-        
         print(f"🔍 Post-analysis filtering: Checking if news should be saved...")
-        
         sentiment_score = risk_analysis.get('sentiment_score', 0.0)
-        
-        # Skip ONLY if sentiment is positive (> 0), regardless of risk level
-        if sentiment_score > 0:
-            print(f"⏭️ Skipping news {news_data['newsId']} - Positive sentiment detected ({sentiment_score:.2f})")
-            
-            # Mark as processed to prevent reprocessing
+        impact_score = risk_analysis.get('impact_score', 0)
+
+        # Skip if sentiment is positive (>0), neutral (==0.0), or impact is between 0 and 20 (inclusive)
+        if sentiment_score >= 0:
+            print(f"⏭️ Skipping news {news_data['newsId']} - Sentiment is positive or neutral ({sentiment_score:.2f})")
             try:
                 with get_knowledge_db_connection() as knowledge_conn:
                     knowledge_conn.execute("""
@@ -273,13 +270,27 @@ def process_news_article(news_data):
                         WHERE news_id = ?
                     """, [news_data['newsId']])
                     knowledge_conn.commit()
-                    print(f"✅ Marked positive news {news_data['newsId']} as processed (skipped)")
+                    print(f"✅ Marked news {news_data['newsId']} as processed (skipped)")
             except Exception as e:
-                print(f"⚠️ Warning: Failed to mark positive news as processed: {e}")
-            
-            return f"Skipped news {news_data['newsId']} - Positive sentiment ({sentiment_score:.2f})"
-        
-        print(f"✅ News has negative/neutral sentiment ({sentiment_score:.2f}) - proceeding to save")
+                print(f"⚠️ Warning: Failed to mark news as processed: {e}")
+            return f"Skipped news {news_data['newsId']} - Sentiment is positive or neutral ({sentiment_score:.2f})"
+
+        if 0 <= impact_score <= 20:
+            print(f"⏭️ Skipping news {news_data['newsId']} - Impact score too low ({impact_score})")
+            try:
+                with get_knowledge_db_connection() as knowledge_conn:
+                    knowledge_conn.execute("""
+                        UPDATE raw_news_data 
+                        SET processed = 1, processed_at = CURRENT_TIMESTAMP 
+                        WHERE news_id = ?
+                    """, [news_data['newsId']])
+                    knowledge_conn.commit()
+                    print(f"✅ Marked news {news_data['newsId']} as processed (skipped)")
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to mark news as processed: {e}")
+            return f"Skipped news {news_data['newsId']} - Impact score too low ({impact_score})"
+
+        print(f"✅ News has negative sentiment ({sentiment_score:.2f}) and sufficient impact ({impact_score}) - proceeding to save")
         
         # ==========================================
         # STEP 2: Check for existing news to prevent duplicates

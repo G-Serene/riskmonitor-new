@@ -107,6 +107,7 @@ class RiskAnalysisEvaluatorOptimizer:
         {feedback_context}
         
         Return JSON with exactly this JSON format:
+        // All numeric fields must be returned as numbers, not strings, in the JSON.
         {{
             "primary_risk_category": "market_risk OR credit_risk OR operational_risk OR liquidity_risk OR cybersecurity_risk OR regulatory_risk OR systemic_risk OR reputational_risk (choose ONE primary category)",
             "secondary_risk_categories": ["additional risk categories that also apply from the above list"],
@@ -114,15 +115,15 @@ class RiskAnalysisEvaluatorOptimizer:
             "severity_level": "Critical|High|Medium|Low",
             "urgency_level": "Critical|High|Medium|Low", 
             "temporal_impact": "Immediate|Short-term|Medium-term|Long-term",
-            "sentiment_score": "SENTIMENT_SCORE_HERE in range -1 to 1. assign negative if the news is negative else positive",
-            "confidence_score": "CONFIDENCE_SCORE_HERE as integer in range 0 to 100. assign 0 if the news is not clear else 100",
-            "impact_score": "IMPACT_SCORE_HERE as integer in range 0 to 100. assign 0 if the news is not clear else 100",
-            "financial_exposure": "FINANCIAL_EXPOSURE_HERE in range 0 to 1000000000. assign 0 if the news is doesnt include financial exposure else actual value",
-            "risk_contribution": "RISK_CONTRIBUTION_HERE in range 0 to 100. assign 0 if the news is doesnt include risk contribution else actual value",
+            "sentiment_score": SENTIMENT_SCORE_HERE in range -1 to 1,  // number, not string
+            "confidence_score": CONFIDENCE_SCORE_HERE as integer in range 0 to 100,  // number, not string
+            "impact_score": IMPACT_SCORE_HERE as integer in range 0 to 100,  // number, not string
+            "financial_exposure": FINANCIAL_EXPOSURE_HERE in range 0 to 1000000000,  // number, not string
+            "risk_contribution": RISK_CONTRIBUTION_HERE in range 0 to 100,  // number, not string
             "geographic_regions": ["geographic_regions_here"],
             "industry_sectors": ["industry_sectors_here"],
             "countries": ["countries_here"],
-            "coordinates": {{"lat": "LATITUDE_HERE", "lng": "LONGITUDE_HERE"}},
+            "coordinates": {"lat": "LATITUDE_HERE", "lng": "LONGITUDE_HERE"},
             "affected_markets": ["affected_markets_here"],
             "keywords": ["keywords_here"],
             "entities": ["entities_here"],

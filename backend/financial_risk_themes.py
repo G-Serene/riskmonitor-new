@@ -225,6 +225,66 @@ FINANCIAL_RISK_THEMES = {
             "novel_financial_disruptions",
             "undefined_risk_events"
         ]
+    },
+    "energy_crisis": {
+        "display_name": "Energy Crisis",
+        "description": "Energy shortages, price spikes, and disruptions in energy supply.",
+        "keywords": ["energy", "oil", "gas", "power outage", "fuel shortage", "energy price", "electricity"],
+        "sub_themes": [
+            "oil_price_shock",
+            "gas_supply_disruption",
+            "power_grid_failure",
+            "fuel_rationing",
+            "energy_policy_crisis"
+        ]
+    },
+    "commodity_crisis": {
+        "display_name": "Commodity Crisis",
+        "description": "Major disruptions or volatility in commodity markets (metals, agriculture, etc.).",
+        "keywords": ["commodity", "metal", "agriculture", "commodity price", "supply shock", "commodity shortage"],
+        "sub_themes": [
+            "metal_price_crash",
+            "agricultural_shortage",
+            "commodity_market_volatility",
+            "resource_nationalization",
+            "commodity_export_ban"
+        ]
+    },
+    "corporate_governance_crisis": {
+        "display_name": "Corporate Governance Crisis",
+        "description": "Scandals, fraud, or failures in corporate governance and oversight.",
+        "keywords": ["governance", "fraud", "scandal", "board", "audit failure", "corporate misconduct"],
+        "sub_themes": [
+            "accounting_fraud",
+            "boardroom_scandal",
+            "executive_misconduct",
+            "audit_failure",
+            "shareholder_lawsuit"
+        ]
+    },
+    "natural_disaster_crisis": {
+        "display_name": "Natural Disaster Crisis",
+        "description": "Major natural disasters impacting financial systems or markets.",
+        "keywords": ["earthquake", "flood", "hurricane", "wildfire", "natural disaster", "tsunami", "disaster impact"],
+        "sub_themes": [
+            "earthquake_damage",
+            "flooding_event",
+            "hurricane_loss",
+            "wildfire_destruction",
+            "tsunami_impact"
+        ]
+    },
+    "workforce_crisis": {
+        "display_name": "Workforce Crisis",
+        "description": "Labor shortages, strikes, or workforce disruptions affecting business or finance.",
+        "keywords": ["labor", "strike", "workforce", "layoff", "union", "labor shortage", "employment crisis"],
+        "sub_themes": [
+            "mass_layoffs",
+            "union_strike",
+            "talent_shortage",
+            "wage_dispute",
+            "employment_disruption"
+        ]
     }
 }
 

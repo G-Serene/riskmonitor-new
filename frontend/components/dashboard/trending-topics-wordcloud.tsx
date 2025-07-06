@@ -109,7 +109,7 @@ export function TrendingTopicsWordCloud({ data, className = "" }: TrendingTopics
           <CardTitle className="text-sm font-medium">Trending Topics</CardTitle>
         </div>
         <CardDescription className="text-xs">
-          Last 10 days • {data.length} topics tracked
+          Top {TRENDING_TOPICS_LIMIT} of {data.length} topics tracked
         </CardDescription>
       </CardHeader>
       <CardContent>

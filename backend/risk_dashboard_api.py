@@ -853,7 +853,7 @@ async def get_theme_statistics():
                 FROM news_articles 
                 WHERE primary_theme IS NOT NULL 
                     AND sentiment_score < 0  -- Only negative news
-                    AND processed_date >= datetime('now', '-10 days')  -- Last 10 days
+                    AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-15 days')  -- Last 15 days from max published date
                 GROUP BY primary_theme, theme_display_name
                 ORDER BY article_count DESC
             """)
@@ -901,7 +901,7 @@ async def get_theme_articles(
                 FROM news_articles 
                 WHERE primary_theme = ?
                     AND sentiment_score < 0  -- Only negative news
-                    AND processed_date >= datetime('now', '-14 days')  -- Last 14 days
+                    AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-15 days')  -- Last 15 days from max published date
                 ORDER BY processed_date DESC, overall_risk_score DESC
                 LIMIT ?
             """, [theme_id, limit])

@@ -381,7 +381,7 @@ export function ThemeAnalytics({ className }: ThemeAnalyticsProps) {
             Risk Themes Distribution
           </CardTitle>
           <CardDescription>
-            Last 10 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
+            Last 15 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 p-6">

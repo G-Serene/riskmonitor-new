@@ -375,7 +375,7 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
   return (
     <div className={`flex flex-col space-y-4 h-full ${className}`}>
       {/* Theme Statistics Bar Chart */}
-      <Card className="flex-1 flex flex-col min-h-0 max-h-[600px]">
+      <Card className="flex-1 flex flex-col min-h-0">
         <CardHeader className="flex-shrink-0">
           <CardTitle className="flex items-center gap-2">
             <BarChart3 className="h-5 w-5" />
@@ -386,7 +386,7 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col min-h-0 p-6">
-          <ScrollArea className="flex-1 pr-4">
+          <ScrollArea className="flex-1 min-h-[200px] pr-4">
             <div className="space-y-4">
               {themeStats.length > 0 ? (
                 <TooltipProvider>

@@ -371,6 +371,9 @@ async def get_latest_news(
             }
             
     except Exception as e:
+        import traceback
+        print(f"❌ Database error in get_latest_news: {str(e)}")
+        print(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Database error1 (get_latest_news): {str(e)}")
 
 @app.get("/api/news/feed")
@@ -462,6 +465,9 @@ async def get_recent_news_feed(
             }
             
     except Exception as e:
+        import traceback
+        print(f"❌ Database error in get_recent_news_feed: {str(e)}")
+        print(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Database error3 (get_recent_news_feed): {str(e)}")
 
 @app.get("/api/news/{news_id}")
@@ -695,6 +701,9 @@ async def get_dashboard_summary(
             return result
             
     except Exception as e:
+        import traceback
+        print(f"❌ Database error in get_dashboard_summary: {str(e)}")
+        print(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Database error4 (get_dashboard_summary): {str(e)}")
 
 @app.get("/api/risk/calculations")
@@ -1154,6 +1163,9 @@ async def generate_theme_storyline(
             }
             
     except Exception as e:
+        import traceback
+        print(f"❌ Storyline generation error: {str(e)}")
+        print(f"Full traceback:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Storyline generation error: {str(e)}")
 
 @app.get("/api/storylines")

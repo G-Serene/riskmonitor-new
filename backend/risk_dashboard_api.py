@@ -599,7 +599,7 @@ async def get_dashboard_summary(
                         SELECT COUNT(*) 
                         FROM news_articles
                         WHERE status != 'Archived'
-                        AND published_date >= datetime('now', '-7 days')
+                        AND published_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-7 days')
                         AND primary_risk_category IS NOT NULL
                     ), 1) as percentage,
                     CASE primary_risk_category
@@ -1019,7 +1019,7 @@ async def generate_theme_storyline(
                 FROM news_articles 
                 WHERE primary_theme = ?
                     AND sentiment_score < 0  -- Only negative news
-                    AND processed_date >= datetime('now', '-{} days')
+                    AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-{} days')
                 ORDER BY overall_risk_score DESC, published_date DESC
             """.format(days_back), [theme_id])
             
@@ -1064,7 +1064,7 @@ async def generate_theme_storyline(
                     SELECT storyline, generated_at, article_count
                     FROM risk_storylines 
                     WHERE theme_id = ? 
-                        AND generated_at >= datetime('now', '-1 day')
+                        AND generated_at >= datetime((SELECT MAX(published_date) FROM news_articles), '-1 day')
                     ORDER BY generated_at DESC 
                     LIMIT 1
                 """, [theme_id])
@@ -1377,7 +1377,7 @@ async def stream_dashboard_updates():
                                 MAX(overall_risk_score) as current_risk_score
                             FROM news_articles 
                             WHERE status != 'Archived'
-                            AND published_date >= datetime('now', '-7 days')
+                            AND published_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-7 days')
                         """).fetchone()
                         
                         if dashboard_counts:
@@ -1408,7 +1408,7 @@ async def stream_dashboard_updates():
                                     SELECT COUNT(*) 
                                     FROM news_articles
                                     WHERE status != 'Archived'
-                                    AND published_date >= datetime('now', '-7 days')
+                                    AND published_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-7 days')
                                     AND primary_risk_category IS NOT NULL
                                 ), 1) as percentage,
                                 CASE primary_risk_category
@@ -1420,7 +1420,7 @@ async def stream_dashboard_updates():
                                 END as chart_color
                             FROM news_articles
                             WHERE status != 'Archived'
-                            AND published_date >= datetime('now', '-7 days')
+                            AND published_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-7 days')
                             AND primary_risk_category IS NOT NULL
                             GROUP BY primary_risk_category
                             ORDER BY news_count DESC

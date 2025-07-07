@@ -1054,6 +1054,7 @@ async def generate_theme_storyline(
         # First, get ALL articles for this theme (not limited)
         print("🔍 Querying database for articles...")
         try:
+            # Single database connection block for all operations
             with get_db_connection() as conn:
                 # First, check the date range we're working with
                 date_info = conn.execute("""
@@ -1169,53 +1170,52 @@ async def generate_theme_storyline(
                             print(f"🔄 Cache stale: {article_increase} new articles ({article_increase_pct:.1f}% increase), {cache_age_hours:.1f}h old")
                 else:
                     print("🔄 Force regenerating storyline (cache bypassed)")
-            
-            # Use smart selection if we have too many articles
-            if len(articles_data) > max_articles:
-                selected_articles = smart_article_selection(articles_data, max_articles)
-                print(f"📊 Selected {len(selected_articles)} most representative articles")
-            else:
-                selected_articles = articles_data
-            
-            # Create comprehensive context for storyline
-            context = create_storyline_context(selected_articles, theme_name)
-            
-            # Generate enhanced LLM prompt
-            storyline_prompt = generate_comprehensive_storyline_prompt(context, selected_articles)
-            
-            print(f"🤖 Generating comprehensive storyline using LLM...")
-            
-            # Generate storyline using LLM
-            print("🤖 Importing LLM utility...")
-            try:
-                from util import llm_call
-                print("✅ Successfully imported LLM utility")
-            except ImportError as llm_import_error:
-                print(f"❌ Failed to import LLM utility: {llm_import_error}")
-                print(f"Full traceback: {traceback.format_exc()}")
-                raise HTTPException(status_code=500, detail=f"LLM import error: {str(llm_import_error)}")
-            
-            print("🤖 Calling LLM for storyline generation...")
-            try:
-                storyline_response = llm_call(
-                    messages=[{"role": "user", "content": storyline_prompt}],
-                    temperature=0.1
-                )
-                print("✅ LLM call successful")
-            except Exception as llm_error:
-                print(f"❌ LLM call failed: {llm_error}")
-                print(f"Full traceback: {traceback.format_exc()}")
-                raise HTTPException(status_code=500, detail=f"LLM call error: {str(llm_error)}")
-            
-            storyline = storyline_response.strip()
-            
-            # Create downloadable report data
-            report_data = create_downloadable_report_data(storyline, context, selected_articles)
-            
-            # Store storyline in database for caching
-            print("💾 Storing storyline in database...")
-            try:
-                with get_db_connection() as conn:
+                
+                # Use smart selection if we have too many articles
+                if len(articles_data) > max_articles:
+                    selected_articles = smart_article_selection(articles_data, max_articles)
+                    print(f"📊 Selected {len(selected_articles)} most representative articles")
+                else:
+                    selected_articles = articles_data
+                
+                # Create comprehensive context for storyline
+                context = create_storyline_context(selected_articles, theme_name)
+                
+                # Generate enhanced LLM prompt
+                storyline_prompt = generate_comprehensive_storyline_prompt(context, selected_articles)
+                
+                print(f"🤖 Generating comprehensive storyline using LLM...")
+                
+                # Generate storyline using LLM
+                print("🤖 Importing LLM utility...")
+                try:
+                    from util import llm_call
+                    print("✅ Successfully imported LLM utility")
+                except ImportError as llm_import_error:
+                    print(f"❌ Failed to import LLM utility: {llm_import_error}")
+                    print(f"Full traceback: {traceback.format_exc()}")
+                    raise HTTPException(status_code=500, detail=f"LLM import error: {str(llm_import_error)}")
+                
+                print("🤖 Calling LLM for storyline generation...")
+                try:
+                    storyline_response = llm_call(
+                        messages=[{"role": "user", "content": storyline_prompt}],
+                        temperature=0.1
+                    )
+                    print("✅ LLM call successful")
+                except Exception as llm_error:
+                    print(f"❌ LLM call failed: {llm_error}")
+                    print(f"Full traceback: {traceback.format_exc()}")
+                    raise HTTPException(status_code=500, detail=f"LLM call error: {str(llm_error)}")
+                
+                storyline = storyline_response.strip()
+                
+                # Create downloadable report data
+                report_data = create_downloadable_report_data(storyline, context, selected_articles)
+                
+                # Store storyline in database for caching (still within same connection)
+                print("💾 Storing storyline in database...")
+                try:
                     conn.execute("""
                         INSERT OR REPLACE INTO risk_storylines 
                         (theme_id, theme_name, storyline, article_count, 
@@ -1229,28 +1229,28 @@ async def generate_theme_storyline(
                     ])
                     conn.commit()
                     print("✅ Storyline stored successfully")
-            except Exception as db_error:
-                print(f"❌ Database storage failed: {db_error}")
-                print(f"Full traceback: {traceback.format_exc()}")
-                # Don't raise here - we can still return the storyline even if caching fails
-                print("⚠️ Continuing without caching...")
-            
-            return {
-                "theme_id": theme_id,
-                "theme_name": theme_name,
-                "storyline": storyline,
-                "context": context,
-                "report_data": report_data,
-                "metadata": {
-                    "articles_analyzed": len(articles_data),
-                    "articles_selected": len(selected_articles),
-                    "affected_countries": context['geographic_scope']['countries'][:10],
-                    "affected_markets": context['market_scope']['markets'][:10],
-                    "severity_distribution": context['severity_distribution'],
-                    "avg_risk_score": context['avg_risk_score'],
-                    "generation_date": datetime.now().isoformat()
+                except Exception as db_error:
+                    print(f"❌ Database storage failed: {db_error}")
+                    print(f"Full traceback: {traceback.format_exc()}")
+                    # Don't raise here - we can still return the storyline even if caching fails
+                    print("⚠️ Continuing without caching...")
+                
+                return {
+                    "theme_id": theme_id,
+                    "theme_name": theme_name,
+                    "storyline": storyline,
+                    "context": context,
+                    "report_data": report_data,
+                    "metadata": {
+                        "articles_analyzed": len(articles_data),
+                        "articles_selected": len(selected_articles),
+                        "affected_countries": context['geographic_scope']['countries'][:10],
+                        "affected_markets": context['market_scope']['markets'][:10],
+                        "severity_distribution": context['severity_distribution'],
+                        "avg_risk_score": context['avg_risk_score'],
+                        "generation_date": datetime.now().isoformat()
+                    }
                 }
-            }
             
         except Exception as db_query_error:
             print(f"❌ Database query failed: {db_query_error}")

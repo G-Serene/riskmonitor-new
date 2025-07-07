@@ -31,7 +31,11 @@ def smart_article_selection(articles: List[Dict], max_articles: int = 25) -> Lis
     recent_articles = sorted_articles[:max_articles][-max_articles//3:]
     
     # Add some geographic/market diversity
-    remaining = [a for a in sorted_articles if a not in top_articles and a not in recent_articles]
+    # Create sets of article IDs for deduplication
+    top_article_ids = {article.get("id") for article in top_articles}
+    recent_article_ids = {article.get("id") for article in recent_articles}
+    
+    remaining = [a for a in sorted_articles if a.get("id") not in top_article_ids and a.get("id") not in recent_article_ids]
     diverse_articles = []
     seen_countries = set()
     seen_markets = set()
@@ -52,15 +56,23 @@ def smart_article_selection(articles: List[Dict], max_articles: int = 25) -> Lis
         if len(diverse_articles) >= max_articles//4:
             break
     
-    # Combine all selected articles
-    selected = list(set(top_articles + recent_articles + diverse_articles))
+    # Combine all selected articles using ID-based deduplication
+    selected_articles = []
+    seen_ids = set()
+    
+    for article_list in [top_articles, recent_articles, diverse_articles]:
+        for article in article_list:
+            article_id = article.get("id")
+            if article_id not in seen_ids:
+                selected_articles.append(article)
+                seen_ids.add(article_id)
     
     # Ensure we don't exceed max_articles
-    if len(selected) > max_articles:
-        selected = selected[:max_articles]
+    if len(selected_articles) > max_articles:
+        selected_articles = selected_articles[:max_articles]
     
     # Sort by date for chronological analysis
-    return sorted(selected, key=lambda x: x.get("published_date", "2020-01-01"))
+    return sorted(selected_articles, key=lambda x: x.get("published_date", "2020-01-01"))
 
 def create_storyline_context(articles: List[Dict], theme_name: str) -> Dict[str, Any]:
     """

@@ -62,28 +62,6 @@ app = FastAPI(
     debug=True  # Enable debug mode to show detailed error tracebacks
 )
 
-# HTTP exception handler to log HTTP errors
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """HTTP exception handler to log HTTP errors"""
-    print("=" * 60)
-    print(f"🚨 HTTP EXCEPTION HANDLER TRIGGERED")
-    print(f"🌐 Request: {request.method} {request.url}")
-    print(f"📊 Status Code: {exc.status_code}")
-    print(f"💬 Detail: {exc.detail}")
-    print("=" * 60)
-    
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": "HTTP Error",
-            "status_code": exc.status_code,
-            "detail": exc.detail,
-            "path": str(request.url),
-            "method": request.method
-        }
-    )
-
 # Global exception handler to catch and log all unhandled exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -91,14 +69,9 @@ async def global_exception_handler(request: Request, exc: Exception):
     error_traceback = traceback.format_exc()
     error_message = f"Internal server error: {str(exc)}"
     
-    print("=" * 80)
-    print(f"❌ GLOBAL EXCEPTION HANDLER TRIGGERED")
-    print(f"🌐 Request: {request.method} {request.url}")
-    print(f"🔥 Exception Type: {type(exc).__name__}")
-    print(f"💬 Exception Message: {exc}")
-    print(f"📋 Full Traceback:")
-    print(error_traceback)
-    print("=" * 80)
+    print(f"❌ UNHANDLED EXCEPTION in {request.method} {request.url}")
+    print(f"Exception: {exc}")
+    print(f"Full traceback:\n{error_traceback}")
     
     return JSONResponse(
         status_code=500,
@@ -107,8 +80,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "message": error_message,
             "traceback": error_traceback if app.debug else None,
             "path": str(request.url),
-            "method": request.method,
-            "exception_type": type(exc).__name__
+            "method": request.method
         }
     )
 
@@ -415,16 +387,6 @@ async def get_recent_news_feed(
             # Build time window clause
             time_clause = time_window_to_datetime_clause(time_window, from_date, to_date)
             
-            # Get total count first
-            count_query = f"""
-                SELECT COUNT(*) 
-                FROM news_articles 
-                WHERE status != 'Archived'
-                  AND {time_clause}
-            """
-            
-            total_count = conn.execute(count_query).fetchone()[0]
-            
             # Query the main news_articles table to get all required fields for the news feed
             query = f"""
                 SELECT 
@@ -494,8 +456,6 @@ async def get_recent_news_feed(
             return {
                 "articles": articles,
                 "count": len(articles),
-                "total_count": total_count,
-                "has_more": offset + limit < total_count,
                 "time_window": time_window,
                 "time_window_description": get_time_window_description(time_window, from_date, to_date),
                 "generated_at": datetime.now().isoformat()
@@ -1028,54 +988,18 @@ async def generate_theme_storyline(
     Generate a comprehensive risk storyline for a specific theme using enhanced LLM analysis.
     Handles large article volumes with intelligent selection and creates detailed banking impact analysis.
     """
-    print(f"🎯 Starting storyline generation for theme: {theme_id}")
-    print(f"📊 Parameters: max_articles={max_articles}, days_back={days_back}, force_regenerate={force_regenerate}")
-    
     try:
         # Import enhanced storyline generation utilities
-        print("📦 Importing enhanced storyline generation utilities...")
-        try:
-            from enhanced_storyline_generator import (
-                smart_article_selection,
-                create_storyline_context,
-                generate_comprehensive_storyline_prompt,
-                create_downloadable_report_data
-            )
-            print("✅ Successfully imported storyline generation utilities")
-        except ImportError as import_error:
-            print(f"❌ Failed to import storyline generation utilities: {import_error}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Import error: {str(import_error)}")
-        except Exception as import_error:
-            print(f"❌ Unexpected error importing storyline utilities: {import_error}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Unexpected import error: {str(import_error)}")
+        from enhanced_storyline_generator import (
+            smart_article_selection,
+            create_storyline_context,
+            generate_comprehensive_storyline_prompt,
+            create_downloadable_report_data
+        )
         
         # First, get ALL articles for this theme (not limited)
-        print("🔍 Querying database for articles...")
-        try:
-            # Single database connection block for all operations
-            with get_db_connection() as conn:
-                # First, check the date range we're working with
-                date_info = conn.execute("""
-                    SELECT 
-                        MAX(published_date) as max_published_date,
-                        datetime((SELECT MAX(published_date) FROM news_articles), '-{} days') as cutoff_date,
-                        COUNT(*) as total_articles_for_theme
-                    FROM news_articles 
-                    WHERE primary_theme = ?
-                """.format(days_back), [theme_id]).fetchone()
-                
-                if date_info:
-                    print(f"📅 Date range info:")
-                    print(f"   Max published date in DB: {date_info['max_published_date']}")
-                    print(f"   Cutoff date ({days_back} days back): {date_info['cutoff_date']}")
-                    print(f"   Total articles for theme (all time): {date_info['total_articles_for_theme']}")
-                else:
-                    print(f"⚠️ No articles found for theme {theme_id} in database")
-                
-                # Get articles for this theme (keeping connection open)
-                cursor = conn.execute("""
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
                 SELECT 
                     id, headline, content, summary, description, source_name,
                     countries, affected_markets, financial_exposure, 
@@ -1086,183 +1010,150 @@ async def generate_theme_storyline(
                 FROM news_articles 
                 WHERE primary_theme = ?
                     AND sentiment_score < 0  -- Only negative news
-                    AND processed_date >= datetime((SELECT MAX(published_date) FROM news_articles), '-{} days')
+                    AND processed_date >= datetime('now', '-{} days')
                 ORDER BY overall_risk_score DESC, published_date DESC
-                """.format(days_back), [theme_id])
+            """.format(days_back), [theme_id])
+            
+            all_articles = cursor.fetchall()
+            
+            if not all_articles:
+                raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
+            
+            # Convert rows to dictionaries for easier handling
+            articles_data = []
+            for row in all_articles:
+                article_dict = dict(row)
+                # Parse JSON fields safely
+                if article_dict.get("countries"):
+                    try:
+                        article_dict["countries"] = json.loads(article_dict["countries"])
+                    except:
+                        article_dict["countries"] = []
                 
-                all_articles = cursor.fetchall()
-                print(f"📰 Found {len(all_articles)} articles in database")
+                if article_dict.get("affected_markets"):
+                    try:
+                        article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
+                    except:
+                        article_dict["affected_markets"] = []
                 
-                if not all_articles:
-                    print(f"❌ No articles found for theme: {theme_id}")
-                    raise HTTPException(status_code=404, detail=f"No articles found for theme: {theme_id}")
+                if article_dict.get("theme_keywords"):
+                    try:
+                        article_dict["theme_keywords"] = json.loads(article_dict["theme_keywords"])
+                    except:
+                        article_dict["theme_keywords"] = []
                 
-                # Convert rows to dictionaries for easier handling
-                articles_data = []
-                for row in all_articles:
-                    article_dict = dict(row)
-                    # Parse JSON fields safely
-                    if article_dict.get("countries"):
-                        try:
-                            article_dict["countries"] = json.loads(article_dict["countries"])
-                        except:
-                            article_dict["countries"] = []
+                articles_data.append(article_dict)
+            
+            theme_name = articles_data[0]["theme_display_name"]
+            
+            print(f"🎯 Found {len(articles_data)} articles for theme: {theme_name}")
+            
+            # Check for cached storyline (only if not forcing regeneration)
+            if not force_regenerate:
+                print("🔍 Checking for cached storyline...")
+                cached_cursor = conn.execute("""
+                    SELECT storyline, generated_at, article_count
+                    FROM risk_storylines 
+                    WHERE theme_id = ? 
+                        AND generated_at >= datetime('now', '-1 day')
+                    ORDER BY generated_at DESC 
+                    LIMIT 1
+                """, [theme_id])
+                
+                cached_result = cached_cursor.fetchone()
+                if cached_result:
+                    cached_article_count = cached_result[2]
+                    current_article_count = len(articles_data)
                     
-                    if article_dict.get("affected_markets"):
-                        try:
-                            article_dict["affected_markets"] = json.loads(article_dict["affected_markets"])
-                        except:
-                            article_dict["affected_markets"] = []
+                    # Check if significant new articles have arrived (>20% increase or >5 new articles)
+                    article_increase = current_article_count - cached_article_count
+                    article_increase_pct = (article_increase / max(cached_article_count, 1)) * 100
                     
-                    if article_dict.get("theme_keywords"):
-                        try:
-                            article_dict["theme_keywords"] = json.loads(article_dict["theme_keywords"])
-                        except:
-                            article_dict["theme_keywords"] = []
+                    # Check how old the cache is
+                    cache_age_hours = (datetime.now() - datetime.fromisoformat(cached_result[1])).total_seconds() / 3600
                     
-                    articles_data.append(article_dict)
-                
-                theme_name = articles_data[0]["theme_display_name"]
-                
-                print(f"🎯 Found {len(articles_data)} articles for theme: {theme_name}")
-                
-                # Check for cached storyline (only if not forcing regeneration)
-                if not force_regenerate:
-                    print("🔍 Checking for cached storyline...")
-                    cached_cursor = conn.execute("""
-                        SELECT storyline, generated_at, article_count
-                        FROM risk_storylines 
-                        WHERE theme_id = ? 
-                            AND generated_at >= datetime('now', '-1 day')
-                        ORDER BY generated_at DESC 
-                        LIMIT 1
-                    """, [theme_id])
-                    
-                    cached_result = cached_cursor.fetchone()
-                    if cached_result:
-                        cached_article_count = cached_result[2]
-                        current_article_count = len(articles_data)
-                        
-                        # Check if significant new articles have arrived (>20% increase or >5 new articles)
-                        article_increase = current_article_count - cached_article_count
-                        article_increase_pct = (article_increase / max(cached_article_count, 1)) * 100
-                        
-                        # Check how old the cache is
-                        cache_age_hours = (datetime.now() - datetime.fromisoformat(cached_result[1])).total_seconds() / 3600
-                        
-                        if article_increase_pct < 20 and article_increase < 5 and cache_age_hours < 6:
-                            print(f"📦 Using cached storyline from {cached_result[1]} (articles: {cached_article_count} vs {current_article_count})")
-                            return {
-                                "theme_id": theme_id,
-                                "theme_name": theme_name,
-                                "storyline": cached_result[0],
-                                "context": {"cached": True, "generated_at": cached_result[1]},
-                                "metadata": {
-                                    "cached": True,
-                                    "articles_analyzed": len(articles_data),
-                                    "cached_article_count": cached_result[2],
-                                    "new_articles_since_cache": article_increase,
-                                    "cache_age_hours": round(cache_age_hours, 1),
-                                    "generation_date": cached_result[1]
-                                }
+                    if article_increase_pct < 20 and article_increase < 5 and cache_age_hours < 6:
+                        print(f"📦 Using cached storyline from {cached_result[1]} (articles: {cached_article_count} vs {current_article_count})")
+                        return {
+                            "theme_id": theme_id,
+                            "theme_name": theme_name,
+                            "storyline": cached_result[0],
+                            "context": {"cached": True, "generated_at": cached_result[1]},
+                            "metadata": {
+                                "cached": True,
+                                "articles_analyzed": len(articles_data),
+                                "cached_article_count": cached_result[2],
+                                "new_articles_since_cache": article_increase,
+                                "cache_age_hours": round(cache_age_hours, 1),
+                                "generation_date": cached_result[1]
                             }
-                        else:
-                            print(f"🔄 Cache stale: {article_increase} new articles ({article_increase_pct:.1f}% increase), {cache_age_hours:.1f}h old")
-                else:
-                    print("🔄 Force regenerating storyline (cache bypassed)")
-                
-                # Use smart selection if we have too many articles
-                if len(articles_data) > max_articles:
-                    selected_articles = smart_article_selection(articles_data, max_articles)
-                    print(f"📊 Selected {len(selected_articles)} most representative articles")
-                else:
-                    selected_articles = articles_data
-                
-                # Create comprehensive context for storyline
-                context = create_storyline_context(selected_articles, theme_name)
-                
-                # Generate enhanced LLM prompt
-                storyline_prompt = generate_comprehensive_storyline_prompt(context, selected_articles)
-                
-                print(f"🤖 Generating comprehensive storyline using LLM...")
-                
-                # Generate storyline using LLM
-                print("🤖 Importing LLM utility...")
-                try:
-                    from util import llm_call
-                    print("✅ Successfully imported LLM utility")
-                except ImportError as llm_import_error:
-                    print(f"❌ Failed to import LLM utility: {llm_import_error}")
-                    print(f"Full traceback: {traceback.format_exc()}")
-                    raise HTTPException(status_code=500, detail=f"LLM import error: {str(llm_import_error)}")
-                
-                print("🤖 Calling LLM for storyline generation...")
-                try:
-                    storyline_response = llm_call(
-                        messages=[{"role": "user", "content": storyline_prompt}],
-                        temperature=0.1
-                    )
-                    print("✅ LLM call successful")
-                except Exception as llm_error:
-                    print(f"❌ LLM call failed: {llm_error}")
-                    print(f"Full traceback: {traceback.format_exc()}")
-                    raise HTTPException(status_code=500, detail=f"LLM call error: {str(llm_error)}")
-                
-                storyline = storyline_response.strip()
-                
-                # Create downloadable report data
-                report_data = create_downloadable_report_data(storyline, context, selected_articles)
-                
-                # Store storyline in database for caching (still within same connection)
-                print("💾 Storing storyline in database...")
-                try:
-                    conn.execute("""
-                        INSERT OR REPLACE INTO risk_storylines 
-                        (theme_id, theme_name, storyline, article_count, 
-                         affected_countries, affected_markets, generated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, [
-                        theme_id, theme_name, storyline, len(selected_articles),
-                        json.dumps(context['geographic_scope']['countries'][:20]), 
-                        json.dumps(context['market_scope']['markets'][:20]),
-                        datetime.now().isoformat()
-                    ])
-                    conn.commit()
-                    print("✅ Storyline stored successfully")
-                except Exception as db_error:
-                    print(f"❌ Database storage failed: {db_error}")
-                    print(f"Full traceback: {traceback.format_exc()}")
-                    # Don't raise here - we can still return the storyline even if caching fails
-                    print("⚠️ Continuing without caching...")
-                
-                return {
-                    "theme_id": theme_id,
-                    "theme_name": theme_name,
-                    "storyline": storyline,
-                    "context": context,
-                    "report_data": report_data,
-                    "metadata": {
-                        "articles_analyzed": len(articles_data),
-                        "articles_selected": len(selected_articles),
-                        "affected_countries": context['geographic_scope']['countries'][:10],
-                        "affected_markets": context['market_scope']['markets'][:10],
-                        "severity_distribution": context['severity_distribution'],
-                        "avg_risk_score": context['avg_risk_score'],
-                        "generation_date": datetime.now().isoformat()
-                    }
+                        }
+                    else:
+                        print(f"🔄 Cache stale: {article_increase} new articles ({article_increase_pct:.1f}% increase), {cache_age_hours:.1f}h old")
+            else:
+                print("🔄 Force regenerating storyline (cache bypassed)")
+            
+            # Use smart selection if we have too many articles
+            if len(articles_data) > max_articles:
+                selected_articles = smart_article_selection(articles_data, max_articles)
+                print(f"📊 Selected {len(selected_articles)} most representative articles")
+            else:
+                selected_articles = articles_data
+            
+            # Create comprehensive context for storyline
+            context = create_storyline_context(selected_articles, theme_name)
+            
+            # Generate enhanced LLM prompt
+            storyline_prompt = generate_comprehensive_storyline_prompt(context, selected_articles)
+            
+            print(f"🤖 Generating comprehensive storyline using LLM...")
+            
+            # Generate storyline using LLM
+            from util import llm_call
+            
+            storyline_response = llm_call(
+                messages=[{"role": "user", "content": storyline_prompt}],
+                temperature=0.1
+            )
+            
+            storyline = storyline_response.strip()
+            
+            # Create downloadable report data
+            report_data = create_downloadable_report_data(storyline, context, selected_articles)
+            
+            # Store storyline in database for caching
+            with get_db_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO risk_storylines 
+                    (theme_id, theme_name, storyline, article_count, 
+                     affected_countries, affected_markets, generated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    theme_id, theme_name, storyline, len(selected_articles),
+                    json.dumps(context['geographic_scope']['countries'][:20]), 
+                    json.dumps(context['market_scope']['markets'][:20]),
+                    datetime.now().isoformat()
+                ])
+                conn.commit()
+            
+            return {
+                "theme_id": theme_id,
+                "theme_name": theme_name,
+                "storyline": storyline,
+                "context": context,
+                "report_data": report_data,
+                "metadata": {
+                    "articles_analyzed": len(articles_data),
+                    "articles_selected": len(selected_articles),
+                    "affected_countries": context['geographic_scope']['countries'][:10],
+                    "affected_markets": context['market_scope']['markets'][:10],
+                    "severity_distribution": context['severity_distribution'],
+                    "avg_risk_score": context['avg_risk_score'],
+                    "generation_date": datetime.now().isoformat()
                 }
+            }
             
-        except Exception as db_query_error:
-            print(f"❌ Database query failed: {db_query_error}")
-            print(f"Full traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Database query error: {str(db_query_error)}")
-            
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 404) without modification
-        raise
     except Exception as e:
-        print(f"❌ UNEXPECTED ERROR in storyline generation: {e}")
-        print(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Storyline generation error: {str(e)}")
 
 @app.get("/api/storylines")

@@ -110,8 +110,7 @@
   }
   html, body {
     @apply bg-background text-foreground;
-    height: 100%;
-    /* Remove overflow: hidden to allow page scrolling if needed */
+    /* Allow natural scrolling when needed */
   }
 }
 
@@ -129,7 +128,7 @@
 /* Ensure the dashboard container uses full viewport properly */
 .dashboard-container {
   min-height: 100vh;
-  /* Remove overflow: hidden to allow natural scrolling */
+  /* Allow natural scrolling when content overflows */
 }
 
 /* Enhanced scrollbar styling for better visibility */

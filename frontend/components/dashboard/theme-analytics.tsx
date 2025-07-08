@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertCircle, BarChart3, FileText, Sparkles, Clock, Download, Eye, Globe, TrendingUp, Target, DollarSign, Truck, CreditCard, Building, LineChart, Settings, Shield, Zap, Package, AlertTriangle, TrendingDown, Droplets, Landmark, TreePine } from "lucide-react"
+import { AlertCircle, BarChart3, FileText, Sparkles, Clock, Download, Eye, Globe, TrendingUp, Target, DollarSign, Truck, CreditCard, Building, LineChart, Settings, Shield, Zap, Package, AlertTriangle, TrendingDown, Droplets, Landmark, TreePine, ChevronDown, ChevronUp } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { apiClient, ThemeStatistics, ThemeStatisticsResponse, ThemeArticlesResponse, StorylineResponse, RecentStorylinesResponse } from "@/lib/api-client"
 import { formatRelativeTime } from "@/lib/time-utils"
@@ -34,6 +34,7 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
   const [generationProgress, setGenerationProgress] = useState(0)
   const [showStorylineDialog, setShowStorylineDialog] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
+  const [isThemeAnalyticsCollapsed, setIsThemeAnalyticsCollapsed] = useState(false)
   const { toast } = useToast()
 
   // Fetch theme statistics and existing storylines on component mount or when refreshKey changes
@@ -377,15 +378,25 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
       {/* Theme Statistics Bar Chart */}
       <Card className="flex-1 flex flex-col min-h-0">
         <CardHeader className="flex-shrink-0">
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5" />
-            Risk Themes Distribution
-          </CardTitle>
+          <div 
+            className="flex items-center gap-3 cursor-pointer hover:bg-muted/50 p-2 rounded-lg transition-colors"
+            onClick={() => setIsThemeAnalyticsCollapsed(!isThemeAnalyticsCollapsed)}
+          >
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Risk Themes Distribution
+              {isThemeAnalyticsCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </CardTitle>
+          </div>
           <CardDescription>
-            Last 15 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments
+            {isThemeAnalyticsCollapsed 
+              ? `${themeStats.length} themes - Click to expand` 
+              : `Last 15 days of negative news articles • Click Generate to create fresh impact assessments • View shows existing assessments - Click to collapse`
+            }
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex-1 flex flex-col min-h-0 p-6">
+        {!isThemeAnalyticsCollapsed && (
+          <CardContent className="flex-1 flex flex-col min-h-0 p-6">
           <ScrollArea className="flex-1 min-h-[200px] pr-4">
             <div className="space-y-4">
               {themeStats.length > 0 ? (
@@ -499,6 +510,7 @@ export function ThemeAnalytics({ className, refreshKey }: ThemeAnalyticsProps) {
             </div>
           </ScrollArea>
         </CardContent>
+        )}
       </Card>
 
       {/* Selected Theme Articles */}

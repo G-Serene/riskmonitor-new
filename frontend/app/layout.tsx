@@ -20,8 +20,8 @@ export default async function RootLayout({
   const defaultOpen = cookieStore.get("sidebar:state")?.value === "true" // [^1]
 
   return (
-    <html lang="en" suppressHydrationWarning className="h-full overflow-hidden">
-      <body className="font-system h-full overflow-hidden">
+    <html lang="en" suppressHydrationWarning>
+      <body className="font-system">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <SidebarProvider defaultOpen={defaultOpen}>{children}</SidebarProvider>
           <Toaster />

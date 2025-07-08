@@ -13,6 +13,8 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -54,7 +56,6 @@ import { TimeWindowSelector } from "@/components/dashboard/time-window-selector"
 import { CriticalAlerts } from "@/components/dashboard/critical-alerts"
 import { LiveUpdatesNotification } from "@/components/dashboard/live-updates-notification"
 import { TrendingTopicsWordCloud } from "@/components/dashboard/trending-topics-wordcloud"
-import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { useDashboardSSE } from "@/hooks/use-dashboard-sse"
 import { apiClient } from "@/lib/api-client"
 import type { DashboardData, NewsArticle, TimeWindow, DateRange } from "@/lib/api-client"
@@ -90,7 +91,7 @@ export default function RiskDashboardContent() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [selectedNews, setSelectedNews] = useState<NewsArticle | null>(null)
   const [isNewsDialogOpen, setIsNewsDialogOpen] = useState(false)
-  const { isMobile } = useSidebar()
+  const [isNewsFeedCollapsed, setIsNewsFeedCollapsed] = useState(false)
   const [newsOffset, setNewsOffset] = useState(0)
   const [newsHasMore, setNewsHasMore] = useState(true)
   const NEWS_PAGE_SIZE = 50;
@@ -411,8 +412,6 @@ export default function RiskDashboardContent() {
       />
       
       <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 py-4 flex-shrink-0">
-        {isMobile && <SidebarTrigger className="sm:hidden" />}
-
         {/* SSE Connection Status */}
         <div className="flex items-center gap-2">
           {sseStatus.isConnected ? (
@@ -447,14 +446,10 @@ export default function RiskDashboardContent() {
             sseConnected={sseStatus.isConnected}
             overallRiskScore={dashboardData?.dashboard_summary.overall_risk_score || 0}
           />
-          <Button variant="default" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Export Report
-          </Button>
         </div>
       </header>
 
-      <main className="flex-1 p-4 sm:px-6 sm:py-0 md:gap-8 overflow-hidden flex flex-col min-h-0">
+      <main className="flex-1 p-4 sm:px-6 sm:py-0 md:gap-8 flex flex-col min-h-0 overflow-auto">
         {/* Mobile Time Window Selector */}
         <div className="mb-4 sm:hidden flex-shrink-0">
           <TimeWindowSelector 
@@ -476,61 +471,61 @@ export default function RiskDashboardContent() {
           </div>
         )}
 
-        {/* Dashboard Time Window Summary */}
-        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-blue-600" />
-              <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                Dashboard metrics filtered by: {dashboardData.time_window_description || "last 24 hours"}
-              </span>
-            </div>
-            <Badge variant="outline" className="border-blue-300 text-blue-700 bg-blue-100">
-              {dashboardData.dashboard_summary.total_news_filtered} articles
-            </Badge>
-          </div>
-        </div>
-
         {/* Full Screen Layout: News Feed Left, Charts Middle, Theme Analytics Right */}
-        <div className="grid gap-4 lg:grid-cols-3 h-[calc(100vh-150px)] min-h-[600px]">
+        <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 min-h-0 flex-1">
           {/* Left Third - Live News Feed */}
           <Card className="flex flex-col h-full overflow-hidden">
             <CardHeader className="flex-shrink-0">
               <div className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Live News Feed</CardTitle>
-                  <CardDescription>
-                    Real-time news impacting financial risk
-                    <Badge variant="outline" className="ml-2 text-xs">
-                      {dashboardData.time_window_description || "filtered by dashboard time window"}
-                    </Badge>
-                  </CardDescription>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    Showing {newsData.length} of {dashboardData.dashboard_summary.total_news_filtered} articles
+                <div 
+                  className="flex items-center gap-3 cursor-pointer hover:bg-muted/50 p-2 rounded-lg transition-colors flex-1"
+                  onClick={() => setIsNewsFeedCollapsed(!isNewsFeedCollapsed)}
+                >
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      Live News Feed
+                      {isNewsFeedCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                    </CardTitle>
+                    <CardDescription>
+                      Real-time news impacting financial risk
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        {dashboardData.time_window_description || "filtered by dashboard time window"}
+                      </Badge>
+                    </CardDescription>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {isNewsFeedCollapsed 
+                        ? `${newsData.length} articles - Click to expand` 
+                        : `Showing ${newsData.length} of ${dashboardData.dashboard_summary.total_news_filtered} articles - Click to collapse`
+                      }
+                    </div>
                   </div>
                 </div>
-                <div className="relative w-full max-w-sm">
-                  <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="search"
-                    placeholder="Search headlines, content, keywords..."
-                    className="pl-10 h-9 text-sm border-border bg-background"
-                    value={filters.searchKeywords}
-                    onChange={(e) => setFilters(prev => ({ ...prev, searchKeywords: e.target.value }))}
-                  />
-                </div>
+                {!isNewsFeedCollapsed && (
+                  <div className="relative w-full max-w-sm ml-4">
+                    <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      placeholder="Search headlines, content, keywords..."
+                      className="pl-10 h-9 text-sm border-border bg-background"
+                      value={filters.searchKeywords}
+                      onChange={(e) => setFilters(prev => ({ ...prev, searchKeywords: e.target.value }))}
+                    />
+                  </div>
+                )}
               </div>
               
               {/* News Feed Filters - All in one line */}
-              <div className="mt-4 pt-4 border-t">
-                <QuickFilters
-                  filters={filters}
-                  onFiltersChange={setFilters}
-                  onOpenAdvanced={() => setShowAdvancedFilters(true)}
-                  articleCount={filteredNewsData.length}
-                  newsData={dashboardData?.news_feed || []}
-                />
-              </div>
+              {!isNewsFeedCollapsed && (
+                <div className="mt-4 pt-4 border-t">
+                  <QuickFilters
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    onOpenAdvanced={() => setShowAdvancedFilters(true)}
+                    articleCount={filteredNewsData.length}
+                    newsData={dashboardData?.news_feed || []}
+                  />
+                </div>
+              )}
             </CardHeader>
 
             {/* Advanced Filters Panel */}
@@ -543,7 +538,8 @@ export default function RiskDashboardContent() {
               availableRiskCategories={availableRiskCategories}
               availableSources={availableSources}
             />
-            <CardContent className="flex-1 overflow-hidden p-0 min-h-0 flex flex-col">
+            {!isNewsFeedCollapsed && (
+              <CardContent className="flex-1 overflow-hidden p-0 min-h-0 flex flex-col">
               <div className="news-feed-scroll px-6 pb-6 flex-1">
                 <div className="space-y-4">
                 {filteredNewsData && filteredNewsData.length > 0 ? (
@@ -656,13 +652,6 @@ export default function RiskDashboardContent() {
                         
                         {/* Financial exposure display removed as requested */}
                         
-                        {/* Breaking News */}
-                        {item.is_breaking_news && (
-                          <Badge className="bg-red-600 text-white animate-pulse">
-                            🚨 BREAKING
-                          </Badge>
-                        )}
-                        
                         {/* Trending */}
                         {item.is_trending && (
                           <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-800">
@@ -674,13 +663,6 @@ export default function RiskDashboardContent() {
                         {item.is_market_moving && (
                           <Badge className="bg-blue-600 text-white">
                             📊 Market Moving
-                          </Badge>
-                        )}
-                        
-                        {/* Requires Action */}
-                        {item.requires_action && (
-                          <Badge className="bg-yellow-600 text-white">
-                            ⚠️ Action Required
                           </Badge>
                         )}
                       </div>
@@ -718,12 +700,13 @@ export default function RiskDashboardContent() {
               </div>
               </div>
             </CardContent>
+            )}
           </Card>
           
           {/* Middle Third - KPIs and Risk Breakdown */}
           <div className="flex flex-col gap-4 h-full min-h-0">
             {/* KPI Cards Grid - 2 cards in a row */}
-            <div className="grid gap-3 grid-cols-2">
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
               {/* Overall Risk Score - Enhanced Banking View */}
               <Card className="flex flex-col">
                 <CardHeader className="pb-2">
@@ -914,17 +897,10 @@ export default function RiskDashboardContent() {
             </div>
 
             {/* Interactive Risk Breakdown */}
-            <div className="h-80">
+            <div className="h-96">
               <InteractiveRiskBreakdown 
                 newsData={filteredNewsData}
                 timeWindowDescription={dashboardData.time_window_description}
-              />
-            </div>
-
-            {/* Trending Topics Word Cloud */}
-            <div className="h-64">
-              <TrendingTopicsWordCloud 
-                data={dashboardData.trending_topics || []}
               />
             </div>
 
@@ -934,6 +910,13 @@ export default function RiskDashboardContent() {
                 newsData={filteredNewsData}
                 timeWindowDescription={dashboardData.time_window_description}
                 currentRiskScore={dashboardData.dashboard_summary.overall_risk_score || 0}
+              />
+            </div>
+
+            {/* Trending Topics Word Cloud */}
+            <div className="h-64">
+              <TrendingTopicsWordCloud 
+                data={dashboardData.trending_topics || []}
               />
             </div>
           </div>
